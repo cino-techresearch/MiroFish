@@ -396,7 +396,10 @@
     "requireGraphIdAndQuery": "Please provide graph_id and query",
     "initReportAgent": "Initializing Report Agent...",
     "injectedProjectNotBuildable": "Injected project reuses an external graph_id and cannot be rebuilt",
-    "injectedProjectNotResettable": "Injected project cannot be reset (it reuses an external graph_id)"
+    "injectedProjectNotResettable": "Injected project cannot be reset (it reuses an external graph_id)",
+    "invalidSimulationId": "Invalid simulation_id",
+    "invalidProfileFileType": "Only .json profile files are supported",
+    "invalidProfileJson": "Profile file is not valid JSON"
   },
   "progress": {
     "initGraphService": "Initializing graph build service...",

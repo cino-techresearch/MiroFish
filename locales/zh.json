@@ -396,7 +396,10 @@
     "requireGraphIdAndQuery": "请提供 graph_id 和 query",
     "initReportAgent": "初始化Report Agent...",
     "injectedProjectNotBuildable": "注入项目复用外部 graph_id，无需构建图谱",
-    "injectedProjectNotResettable": "注入项目无法重置（复用的是外部 graph_id）"
+    "injectedProjectNotResettable": "注入项目无法重置（复用的是外部 graph_id）",
+    "invalidSimulationId": "无效的 simulation_id",
+    "invalidProfileFileType": "仅支持 .json 配置文件",
+    "invalidProfileJson": "配置文件不是有效的 JSON"
   },
   "progress": {
     "initGraphService": "初始化图谱构建服务...",

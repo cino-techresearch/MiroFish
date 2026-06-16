@@ -3,7 +3,9 @@
 Step2: Zep实体读取与过滤、OASIS模拟准备与运行（全程自动化）
 """
 
+import json
 import os
+import re
 import traceback
 from flask import request, jsonify, send_file
 
@@ -13,9 +15,13 @@ from ..services.zep_entity_reader import ZepEntityReader
 from ..services.oasis_profile_generator import OasisProfileGenerator
 from ..services.simulation_manager import SimulationManager, SimulationStatus
 from ..services.simulation_runner import SimulationRunner, RunnerStatus
+from ..services.profile_validator import validate_profiles, ProfileValidationError
 from ..utils.logger import get_logger
 from ..utils.locale import t, get_locale, set_locale
 from ..models.project import ProjectManager
+
+# 안전한 simulation_id 패턴 (경로 traversal 차단)
+_SAFE_SIM_ID = re.compile(r'^[A-Za-z0-9_-]+$')
 
 logger = get_logger('mirofish.api.simulation')
 
@@ -2709,6 +2715,71 @@ def close_simulation_env():
         
     except Exception as e:
         logger.error(f"关闭环境失败: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }), 500
+
+
+@simulation_bp.route('/profiles/upload', methods=['POST'])
+def upload_profiles():
+    """중립 JSON 프로필을 주입해 injected_profiles.json 으로 저장한다 (FR-004, NFR-004).
+
+    입력(둘 중 하나):
+    - JSON body: {"simulation_id": "...", "profiles": [ {...}, ... ]}
+    - multipart/form-data: simulation_id 필드 + file(.json)
+
+    보안: 크기 초과(413, Flask MAX_CONTENT_LENGTH) / 비-JSON 확장자(400) /
+    스키마 위반(400) / 경로 traversal(400).
+    """
+    try:
+        # simulation_id 수집 (form 우선, 그다음 json)
+        simulation_id = (request.form.get('simulation_id')
+                         or (request.get_json(silent=True) or {}).get('simulation_id')
+                         or '')
+        simulation_id = str(simulation_id).strip()
+
+        # 경로 traversal 차단 — 화이트리스트 패턴만 허용
+        if not simulation_id or not _SAFE_SIM_ID.match(simulation_id):
+            return jsonify({"success": False, "error": t('api.invalidSimulationId')}), 400
+
+        # 프로필 데이터 수집
+        if 'file' in request.files:
+            up = request.files['file']
+            filename = up.filename or ''
+            if not filename.lower().endswith('.json'):
+                return jsonify({"success": False, "error": t('api.invalidProfileFileType')}), 400
+            try:
+                profiles = json.loads(up.read().decode('utf-8'))
+            except (ValueError, UnicodeDecodeError):
+                return jsonify({"success": False, "error": t('api.invalidProfileJson')}), 400
+        else:
+            body = request.get_json(silent=True) or {}
+            profiles = body.get('profiles')
+
+        # 스키마 검증 (fail-fast)
+        try:
+            validate_profiles(profiles)
+        except ProfileValidationError as ve:
+            return jsonify({"success": False, "error": str(ve)}), 400
+
+        # injected_profiles.json 으로 저장
+        manager = SimulationManager()
+        sim_dir = manager._get_simulation_dir(simulation_id)
+        os.makedirs(sim_dir, exist_ok=True)
+        out_path = os.path.join(sim_dir, 'injected_profiles.json')
+        with open(out_path, 'w', encoding='utf-8') as f:
+            json.dump(profiles, f, ensure_ascii=False, indent=2)
+
+        return jsonify({
+            "success": True,
+            "simulation_id": simulation_id,
+            "count": len(profiles),
+            "path": out_path,
+        })
+
+    except Exception as e:
         return jsonify({
             "success": False,
             "error": str(e),

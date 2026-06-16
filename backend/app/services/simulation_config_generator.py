@@ -295,7 +295,8 @@ class SimulationConfigGenerator:
         
         # ========== 步骤1: 生成时间配置 ==========
         report_progress(1, t('progress.generatingTimeConfig'))
-        num_entities = len(entities)
+        # 주입 프로필이면 agent 수는 프로필 수 기준(엔티티 수 무관, FR-005 재설계)
+        num_entities = len(agent_profiles) if agent_profiles is not None else len(entities)
         time_config_result = self._generate_time_config(context, num_entities)
         time_config = self._parse_time_config(time_config_result, num_entities)
         reasoning_parts.append(f"{t('progress.timeConfigLabel')}: {time_config_result.get('reasoning', t('common.success'))}")

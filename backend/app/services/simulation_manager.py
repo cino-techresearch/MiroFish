@@ -337,6 +337,11 @@ class SimulationManager:
             # 그 외에는 현행 ZEP 엔티티 기반 생성 경로를 사용한다.
             if is_injected_profiles:
                 profiles = FileProfileSource(profiles_path=injected_profiles_path).load_profiles()
+                # OASIS 정합(FR-005): OASIS 는 agent_id 를 프로필 *위치*(0..N-1)로 부여한다.
+                # 임의 개수 주입은 허용하되, user_id 를 위치 인덱스로 정규화해 agent_id/
+                # 저장 user_id/poster_agent_id 가 모두 OASIS 위치와 일치하게 한다.
+                for idx, p in enumerate(profiles):
+                    p.user_id = idx
                 # 저장은 LLM 키 없이 가능한 serializer 만 사용 (generator __init__ 우회)
                 saver = OasisProfileGenerator.__new__(OasisProfileGenerator)
             else:
@@ -473,14 +478,17 @@ class SimulationManager:
                         initial_posts,
                     )
                 except InjectionConsistencyError as ce:
-                    # 부분 산출물 정리: config_generated 를 내리고 simulation_config.json 제거.
+                    # 부분 산출물 정리: config_generated 를 내리고 생성된 산출물(config + 프로필 파일) 제거.
                     # (이렇게 해야 _check_simulation_prepared 가 이 FAILED 를 "준비됨"으로 오판하지 않음)
                     state.config_generated = False
-                    try:
-                        if os.path.exists(config_path):
-                            os.remove(config_path)
-                    except OSError:
-                        pass
+                    for _stale in (config_path,
+                                   os.path.join(sim_dir, "reddit_profiles.json"),
+                                   os.path.join(sim_dir, "twitter_profiles.csv")):
+                        try:
+                            if os.path.exists(_stale):
+                                os.remove(_stale)
+                        except OSError:
+                            pass
                     state.status = SimulationStatus.FAILED
                     state.error = str(ce)
                     self._save_simulation_state(state)

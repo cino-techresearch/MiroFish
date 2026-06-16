@@ -22,14 +22,17 @@ def _p(uid):
     return {"user_id": uid, "user_name": f"u{uid}", "name": f"n{uid}", "bio": "b", "persona": "p"}
 
 
-def test_validate_profiles_rejects_non_zero_based():
+def test_validate_profiles_accepts_arbitrary_unique_user_ids():
+    # 재설계(FR-005): agent_config 를 프로필에서 파생하므로 0-기반 연속 제약 없음.
+    # 고유 임의 정수 user_id 허용.
+    validate_profiles([_p(1), _p(2), _p(3)])   # 1-기반 OK
+    validate_profiles([_p(10), _p(99), _p(0)]) # 비연속 OK
+
+
+def test_validate_profiles_still_rejects_duplicate_user_id():
     with pytest.raises(ProfileValidationError) as ei:
-        validate_profiles([_p(1), _p(2), _p(3)])  # 1-기반 → 거부
-    assert "0-기반" in str(ei.value)
-
-
-def test_validate_profiles_accepts_zero_based():
-    validate_profiles([_p(0), _p(1), _p(2)])  # 예외 없음
+        validate_profiles([_p(0), _p(0)])
+    assert "중복" in str(ei.value)
 
 
 def test_check_simulation_prepared_failed_not_prepared(tmp_path, monkeypatch):

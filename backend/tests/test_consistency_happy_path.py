@@ -28,14 +28,19 @@ class _ConfigGen:
 
     def generate_config(self, **k):
         _ConfigGen.called = True
-        n = 3
+        # 재설계 반영: 주입 프로필이 오면 agent_config 를 그 프로필 user_id 에서 파생(실 생성기와 동일)
+        agent_profiles = k.get("agent_profiles")
+        if agent_profiles is not None:
+            ids = [p.user_id for p in agent_profiles]
+        else:
+            ids = list(range(3))
 
         class _P:
             generation_reasoning = "r"
-            agent_configs = [{"agent_id": i} for i in range(n)]
+            agent_configs = [{"agent_id": i} for i in ids]
 
             class event_config:
-                initial_posts = [{"poster_agent_id": 0}, {"poster_agent_id": 2}]
+                initial_posts = [{"poster_agent_id": ids[0]}] if ids else []
 
             def to_json(self):
                 return json.dumps({})
@@ -60,17 +65,24 @@ def _inject(manager, sim_id, ids):
         json.dump(profs, f)
 
 
-def test_natural_injection_zero_based_reaches_ready(manager):
+def test_injection_reaches_ready(manager):
     state = manager.create_simulation(project_id="p", graph_id="g1", enable_twitter=False, enable_reddit=True)
-    _inject(manager, state.simulation_id, [0, 1, 2])  # 0-based 연속, 엔티티 3개와 일치
+    _inject(manager, state.simulation_id, [0, 1, 2])
     result = manager.prepare_simulation(simulation_id=state.simulation_id, simulation_requirement="r", document_text="d")
     assert result.status == SimulationStatus.READY
 
 
-def test_count_mismatch_rejected_before_config(manager):
+def test_arbitrary_count_injection_allowed(manager):
+    # 재설계(FR-005): 주입 프로필 수가 그래프 엔티티 수(3)와 달라도 READY (agent_config 를 프로필에서 파생)
     state = manager.create_simulation(project_id="p", graph_id="g1", enable_twitter=False, enable_reddit=True)
-    _inject(manager, state.simulation_id, [0, 1])  # 2개 != 엔티티 3개
+    _inject(manager, state.simulation_id, [0, 1])  # 2개 != 엔티티 3개 — 이제 허용
     result = manager.prepare_simulation(simulation_id=state.simulation_id, simulation_requirement="r", document_text="d")
-    assert result.status == SimulationStatus.FAILED
-    # config LLM 호출 이전에 거부되어야 한다 (cheap pre-check)
-    assert _ConfigGen.called is False
+    assert result.status == SimulationStatus.READY
+
+
+def test_arbitrary_user_ids_injection_allowed(manager):
+    # 비-0-기반/비연속 user_id 도 허용 (agent_id 로 그대로 사용)
+    state = manager.create_simulation(project_id="p", graph_id="g1", enable_twitter=False, enable_reddit=True)
+    _inject(manager, state.simulation_id, [10, 25, 99])
+    result = manager.prepare_simulation(simulation_id=state.simulation_id, simulation_requirement="r", document_text="d")
+    assert result.status == SimulationStatus.READY

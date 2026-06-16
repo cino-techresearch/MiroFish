@@ -23,28 +23,42 @@ def client(tmp_path, monkeypatch):
     return app.test_client()
 
 
+@pytest.fixture
+def sim_id():
+    # 업로드는 존재하는 simulation 에만 허용되므로 먼저 생성한다
+    state = SimulationManager().create_simulation(project_id="proj_x", graph_id="g1")
+    return state.simulation_id
+
+
 def _valid(uid):
     return {"user_id": uid, "user_name": f"u{uid}", "name": f"n{uid}", "bio": "b", "persona": "p"}
 
 
-def test_valid_upload_writes_injected_profiles(client):
+def test_valid_upload_writes_injected_profiles(client, sim_id):
     resp = client.post("/api/simulation/profiles/upload", json={
-        "simulation_id": "sim_abc", "profiles": [_valid(0), _valid(1)],
+        "simulation_id": sim_id, "profiles": [_valid(0), _valid(1)],
     })
     assert resp.status_code == 200, resp.get_data(as_text=True)
     body = resp.get_json()
     assert body["count"] == 2
-    path = os.path.join(SimulationManager.SIMULATION_DATA_DIR, "sim_abc", "injected_profiles.json")
+    path = os.path.join(SimulationManager.SIMULATION_DATA_DIR, sim_id, "injected_profiles.json")
     assert os.path.exists(path)
     assert len(json.load(open(path, encoding="utf-8"))) == 2
 
 
-def test_schema_violation_rejected(client):
+def test_schema_violation_rejected(client, sim_id):
     bad = _valid(0); del bad["persona"]
     resp = client.post("/api/simulation/profiles/upload", json={
-        "simulation_id": "sim_abc", "profiles": [bad],
+        "simulation_id": sim_id, "profiles": [bad],
     })
     assert resp.status_code == 400
+
+
+def test_upload_to_missing_simulation_404(client):
+    resp = client.post("/api/simulation/profiles/upload", json={
+        "simulation_id": "sim_does_not_exist", "profiles": [_valid(0)],
+    })
+    assert resp.status_code == 404
 
 
 def test_path_traversal_rejected(client):
@@ -54,9 +68,9 @@ def test_path_traversal_rejected(client):
     assert resp.status_code == 400
 
 
-def test_bad_extension_rejected(client):
+def test_bad_extension_rejected(client, sim_id):
     data = {
-        "simulation_id": "sim_abc",
+        "simulation_id": sim_id,
         "file": (io.BytesIO(b"not json"), "profiles.txt"),
     }
     resp = client.post("/api/simulation/profiles/upload", data=data,

@@ -16,6 +16,7 @@ from ..config import Config
 from ..utils.logger import get_logger
 from .zep_entity_reader import ZepEntityReader, FilteredEntities
 from .oasis_profile_generator import OasisProfileGenerator, OasisAgentProfile
+from .profile_source import FileProfileSource
 from .simulation_config_generator import SimulationConfigGenerator, SimulationParameters
 from ..utils.locale import t
 
@@ -312,40 +313,50 @@ class SimulationManager:
                     total=total_entities
                 )
             
-            # 传入graph_id以启用Zep检索功能，获取更丰富的上下文
-            generator = OasisProfileGenerator(graph_id=state.graph_id)
-            
             def profile_progress(current, total, msg):
                 if progress_callback:
                     progress_callback(
-                        "generating_profiles", 
-                        int(current / total * 100), 
+                        "generating_profiles",
+                        int(current / total * 100),
                         msg,
                         current=current,
                         total=total,
                         item_name=msg
                     )
-            
-            # 设置实时保存的文件路径（优先使用 Reddit JSON 格式）
-            realtime_output_path = None
-            realtime_platform = "reddit"
-            if state.enable_reddit:
-                realtime_output_path = os.path.join(sim_dir, "reddit_profiles.json")
+
+            # ProfileSource 분기 (FR-005, FR-011):
+            # injected_profiles.json 이 있으면 주입 프로필을 로드(LLM 0회)하고 생성을 건너뛴다.
+            # 그 외에는 현행 ZEP 엔티티 기반 생성 경로를 사용한다.
+            injected_profiles_path = os.path.join(sim_dir, "injected_profiles.json")
+            if os.path.exists(injected_profiles_path):
+                profiles = FileProfileSource(profiles_path=injected_profiles_path).load_profiles()
+                # 저장은 LLM 키 없이 가능한 serializer 만 사용 (generator __init__ 우회)
+                saver = OasisProfileGenerator.__new__(OasisProfileGenerator)
+            else:
+                # 传入graph_id以启用Zep检索功能，获取更丰富的上下文
+                generator = OasisProfileGenerator(graph_id=state.graph_id)
+
+                # 设置实时保存的文件路径（优先使用 Reddit JSON 格式）
+                realtime_output_path = None
                 realtime_platform = "reddit"
-            elif state.enable_twitter:
-                realtime_output_path = os.path.join(sim_dir, "twitter_profiles.csv")
-                realtime_platform = "twitter"
-            
-            profiles = generator.generate_profiles_from_entities(
-                entities=filtered.entities,
-                use_llm=use_llm_for_profiles,
-                progress_callback=profile_progress,
-                graph_id=state.graph_id,  # 传入graph_id用于Zep检索
-                parallel_count=parallel_profile_count,  # 并行生成数量
-                realtime_output_path=realtime_output_path,  # 实时保存路径
-                output_platform=realtime_platform  # 输出格式
-            )
-            
+                if state.enable_reddit:
+                    realtime_output_path = os.path.join(sim_dir, "reddit_profiles.json")
+                    realtime_platform = "reddit"
+                elif state.enable_twitter:
+                    realtime_output_path = os.path.join(sim_dir, "twitter_profiles.csv")
+                    realtime_platform = "twitter"
+
+                profiles = generator.generate_profiles_from_entities(
+                    entities=filtered.entities,
+                    use_llm=use_llm_for_profiles,
+                    progress_callback=profile_progress,
+                    graph_id=state.graph_id,  # 传入graph_id用于Zep检索
+                    parallel_count=parallel_profile_count,  # 并行生成数量
+                    realtime_output_path=realtime_output_path,  # 实时保存路径
+                    output_platform=realtime_platform  # 输出格式
+                )
+                saver = generator
+
             state.profiles_count = len(profiles)
             
             # 保存Profile文件（注意：Twitter使用CSV格式，Reddit使用JSON格式）
@@ -359,15 +370,15 @@ class SimulationManager:
                 )
             
             if state.enable_reddit:
-                generator.save_profiles(
+                saver.save_profiles(
                     profiles=profiles,
                     file_path=os.path.join(sim_dir, "reddit_profiles.json"),
                     platform="reddit"
                 )
-            
+
             if state.enable_twitter:
                 # Twitter使用CSV格式！这是OASIS的要求
-                generator.save_profiles(
+                saver.save_profiles(
                     profiles=profiles,
                     file_path=os.path.join(sim_dir, "twitter_profiles.csv"),
                     platform="twitter"

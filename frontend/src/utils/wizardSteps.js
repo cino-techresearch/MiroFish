@@ -22,13 +22,3 @@ export function getWizardPlan(config = {}) {
   return { steps, useInjectedProfiles, skippedSteps }
 }
 
-/**
- * 현재 스텝 다음의 활성 스텝을 반환한다 (스킵된 스텝은 건너뜀).
- * @returns {string|null} 다음 스텝 id 또는 마지막이면 null
- */
-export function nextStep(current, config = {}) {
-  const { steps } = getWizardPlan(config)
-  const idx = steps.indexOf(current)
-  if (idx === -1 || idx === steps.length - 1) return null
-  return steps[idx + 1]
-}

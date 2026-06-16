@@ -479,6 +479,14 @@ class SimulationManager:
                         initial_posts,
                     )
                 except InjectionConsistencyError as ce:
+                    # 부분 산출물 정리: config_generated 를 내리고 simulation_config.json 제거.
+                    # (이렇게 해야 _check_simulation_prepared 가 이 FAILED 를 "준비됨"으로 오판하지 않음)
+                    state.config_generated = False
+                    try:
+                        if os.path.exists(config_path):
+                            os.remove(config_path)
+                    except OSError:
+                        pass
                     state.status = SimulationStatus.FAILED
                     state.error = str(ce)
                     self._save_simulation_state(state)

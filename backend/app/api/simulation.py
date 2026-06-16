@@ -313,8 +313,10 @@ def _check_simulation_prepared(simulation_id: str) -> tuple:
         # - running: 正在运行，说明准备早就完成了
         # - completed: 运行完成，说明准备早就完成了
         # - stopped: 已停止，说明准备早就完成了
-        # - failed: 运行失败（但准备是完成的）
-        prepared_statuses = ["ready", "preparing", "running", "completed", "stopped", "failed"]
+        # 注意: "failed" 는 준비 완료로 보지 않는다 — 정합성 실패 등으로 FAILED 된 주입 경로가
+        # 부분 산출물(config_generated=True)만으로 "이미 준비됨"으로 오판되어 재-prepare 를
+        # 막는 것을 방지한다. failed 는 force_regenerate 로 재시도해야 한다.
+        prepared_statuses = ["ready", "preparing", "running", "completed", "stopped"]
         if status in prepared_statuses and config_generated:
             # 获取文件统计信息
             profiles_file = os.path.join(simulation_dir, "reddit_profiles.json")

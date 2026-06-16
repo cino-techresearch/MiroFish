@@ -58,4 +58,3 @@ packages = ["app"]
 testpaths = ["tests", "scripts"]
 pythonpath = ["."]
 addopts = "-ra"
-

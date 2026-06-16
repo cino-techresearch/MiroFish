@@ -64,5 +64,15 @@ def validate_profiles(profiles: Any) -> None:
                 errors.append(f"[{idx}] user_id 중복: {uid}")
             seen_user_ids.add(uid)
 
+    # user_id 는 0-기반 연속이어야 한다 (OASIS agent_id=0..N-1 와 매칭되기 위함).
+    # 타입/중복 에러가 없을 때만 연속성 검사(중복/타입 에러가 우선).
+    if not errors and seen_user_ids:
+        expected = set(range(len(profiles)))
+        if seen_user_ids != expected:
+            errors.append(
+                f"user_id 는 0-기반 연속이어야 합니다 (0..{len(profiles) - 1}). "
+                f"받은 집합: {sorted(seen_user_ids)}"
+            )
+
     if errors:
         raise ProfileValidationError("주입 프로필 검증 실패:\n- " + "\n- ".join(errors))

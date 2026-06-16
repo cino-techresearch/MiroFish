@@ -10,7 +10,6 @@ from flask import request, jsonify
 
 from . import graph_bp
 from ..config import Config
-from ..services.ontology_generator import OntologyGenerator
 from ..services.ontology_source import LLMOntologySource, ZepGraphOntologySource
 from ..services.graph_builder import GraphBuilderService
 from ..services.text_processor import TextProcessor

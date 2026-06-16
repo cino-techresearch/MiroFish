@@ -16,9 +16,10 @@ from ..config import Config
 from ..utils.logger import get_logger
 from .zep_entity_reader import ZepEntityReader, FilteredEntities
 from .oasis_profile_generator import OasisProfileGenerator, OasisAgentProfile
-from .profile_source import FileProfileSource
+from .profile_source import FileProfileSource, GeneratedProfileSource
 from .injection_consistency import validate_injection_consistency, InjectionConsistencyError
 from .simulation_config_generator import SimulationConfigGenerator, SimulationParameters
+from ..models.project import ProjectManager
 from ..utils.locale import t
 
 logger = get_logger('mirofish.simulation')
@@ -352,18 +353,30 @@ class SimulationManager:
                     realtime_output_path = os.path.join(sim_dir, "twitter_profiles.csv")
                     realtime_platform = "twitter"
 
-                profiles = generator.generate_profiles_from_entities(
+                # GeneratedProfileSource 어댑터를 통해 생성 (생성 경로도 ProfileSource 추상 사용)
+                gen_source = GeneratedProfileSource(
                     entities=filtered.entities,
                     use_llm=use_llm_for_profiles,
                     progress_callback=profile_progress,
-                    graph_id=state.graph_id,  # 传入graph_id用于Zep检索
-                    parallel_count=parallel_profile_count,  # 并行生成数量
-                    realtime_output_path=realtime_output_path,  # 实时保存路径
-                    output_platform=realtime_platform  # 输出格式
+                    graph_id=state.graph_id,
+                    parallel_count=parallel_profile_count,
+                    realtime_output_path=realtime_output_path,
+                    output_platform=realtime_platform,
+                    generator=generator,
                 )
+                profiles = gen_source.load_profiles()
                 saver = generator
 
             state.profiles_count = len(profiles)
+
+            # FR-009: profile layer provenance 기록 (주입=file / 생성=generated)
+            try:
+                _proj = ProjectManager.get_project(state.project_id)
+                if _proj is not None:
+                    _proj.profile_source = "file" if is_injected_profiles else "generated"
+                    ProjectManager.save_project(_proj)
+            except Exception as _e:
+                logger.warning(f"profile_source provenance 기록 실패: {_e}")
 
             # FR-012 cheap pre-check: 주입 프로필 수가 ZEP 엔티티 수와 다르면
             # config LLM 호출 *이전* 에 fail-fast 로 거부한다(비용 절약 + 부분 산출물 방지).

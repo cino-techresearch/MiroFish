@@ -297,12 +297,18 @@ class SimulationManager:
                     total=filtered.filtered_count
                 )
             
-            if filtered.filtered_count == 0:
+            # 주입 프로필 경로 여부를 엔티티-0 가드보다 먼저 판정한다 (FR-005).
+            # 주입 경로는 엔티티-0이어도 generic "엔티티 없음" 으로 선점되지 않고,
+            # 아래 cheap pre-check(프로필 수 != 엔티티 수)가 더 명확한 사유로 처리한다.
+            injected_profiles_path = os.path.join(sim_dir, "injected_profiles.json")
+            is_injected_profiles = os.path.exists(injected_profiles_path)
+
+            if filtered.filtered_count == 0 and not is_injected_profiles:
                 state.status = SimulationStatus.FAILED
                 state.error = "没有找到符合条件的实体，请检查图谱是否正确构建"
                 self._save_simulation_state(state)
                 return state
-            
+
             # ========== 阶段2: 生成Agent Profile ==========
             total_entities = len(filtered.entities)
             
@@ -328,8 +334,7 @@ class SimulationManager:
             # ProfileSource 분기 (FR-005, FR-011):
             # injected_profiles.json 이 있으면 주입 프로필을 로드(LLM 0회)하고 생성을 건너뛴다.
             # 그 외에는 현행 ZEP 엔티티 기반 생성 경로를 사용한다.
-            injected_profiles_path = os.path.join(sim_dir, "injected_profiles.json")
-            if os.path.exists(injected_profiles_path):
+            if is_injected_profiles:
                 profiles = FileProfileSource(profiles_path=injected_profiles_path).load_profiles()
                 # 저장은 LLM 키 없이 가능한 serializer 만 사용 (generator __init__ 우회)
                 saver = OasisProfileGenerator.__new__(OasisProfileGenerator)

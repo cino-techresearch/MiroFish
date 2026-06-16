@@ -58,3 +58,8 @@ backend/uploads/
 
 # Docker 数据
 data/
+
+# ram-ai-plugin 작업 공간 (worktrees/플랜/태스크 — 추적 제외)
+.ram/
+.omc/
+.serena/

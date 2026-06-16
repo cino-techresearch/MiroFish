@@ -16,9 +16,6 @@
       </div>
     </nav>
 
-    <!-- 레이어 주입 패널 (FR-008): 업로드 단계에서 기존 그래프/프로필 주입 선택 -->
-    <InjectionPanel v-if="currentPhase < 1" @change="onInjectionChange" />
-
     <!-- 主内容区 -->
     <div class="main-content">
       <!-- 左侧: 实时图谱展示 -->
@@ -417,11 +414,8 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { generateOntology, getProject, buildGraph, getTaskStatus, getGraphData, injectGraph } from '../api/graph'
+import { generateOntology, getProject, buildGraph, getTaskStatus, getGraphData } from '../api/graph'
 import { getPendingUpload, clearPendingUpload } from '../store/pendingUpload'
-import InjectionPanel from '../components/InjectionPanel.vue'
-import { getWizardPlan } from '../utils/wizardSteps'
-import { resolveOntologyAction, startInjection } from '../utils/projectStart'
 import * as d3 from 'd3'
 
 const route = useRoute()
@@ -441,12 +435,6 @@ const ontologyProgress = ref(null) // 本体生成进度
 const currentPhase = ref(-1) // -1: 上传中, 0: 本体生成中, 1: 图谱构建, 2: 完成
 const selectedItem = ref(null) // 选中的节点或边
 const isFullScreen = ref(false)
-
-// 레이어 주입 설정 (FR-008) — InjectionPanel 의 change 이벤트로 갱신
-const injectionConfig = ref({ ontologyMode: 'generate', profileMode: 'generate' })
-// 주입 설정에 따른 마법사 계획(스킵 스텝 포함)
-const wizardPlan = computed(() => getWizardPlan(injectionConfig.value))
-const onInjectionChange = (cfg) => { injectionConfig.value = cfg }
 
 // DOM引用
 const graphContainer = ref(null)
@@ -579,10 +567,8 @@ const initProject = async () => {
 // 处理新建项目 - 调用 ontology/generate API
 const handleNewProject = async () => {
   const pending = getPendingUpload()
-
-  // 온톨로지 주입 모드는 파일 업로드가 필요 없다 (기존 graph_id 재사용)
-  const isOntologyInject = resolveOntologyAction(injectionConfig.value) === 'inject'
-  if (!isOntologyInject && (!pending.isPending || pending.files.length === 0)) {
+  
+  if (!pending.isPending || pending.files.length === 0) {
     error.value = '没有待上传的文件，请返回首页重新操作'
     loading.value = false
     return
@@ -590,30 +576,9 @@ const handleNewProject = async () => {
   
   try {
     loading.value = true
-
-    // FR-008: 온톨로지 주입 모드면 기존 graph_id 를 재사용(생성/빌드 스텝 스킵)
-    if (resolveOntologyAction(injectionConfig.value) === 'inject') {
-      currentPhase.value = 0
-      ontologyProgress.value = { message: '기존 그래프 주입 중...' }
-      const resp = await startInjection(injectionConfig.value, pending.simulationRequirement, { injectGraph })
-      if (resp.success) {
-        clearPendingUpload()
-        currentProjectId.value = resp.project_id
-        projectData.value = resp
-        router.replace({ name: 'Process', params: { projectId: resp.project_id } })
-        ontologyProgress.value = null
-        // wizardPlan 이 graphBuild 를 스킵하므로 그래프 빌드 없이 준비 완료 단계로
-        currentPhase.value = wizardPlan.value.skippedSteps.includes('graphBuild') ? 2 : 1
-      } else {
-        error.value = resp.error || '그래프 주입 실패'
-      }
-      loading.value = false
-      return
-    }
-
     currentPhase.value = 0 // 本体生成阶段
     ontologyProgress.value = { message: '正在上传文件并分析文档...' }
-
+    
     // 构建 FormData
     const formDataObj = new FormData()
     pending.files.forEach(file => {

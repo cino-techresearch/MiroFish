@@ -18,6 +18,7 @@ from ..utils.logger import get_logger
 from ..utils.locale import t, get_locale, set_locale
 from ..models.task import TaskManager, TaskStatus
 from ..models.project import ProjectManager, ProjectStatus
+from ..services.graph_injection import validate_graph_id, GraphInjectionError
 
 # 获取日志器
 logger = get_logger('mirofish.api')
@@ -613,7 +614,59 @@ def delete_graph(graph_id: str):
             "success": True,
             "message": t('api.graphDeleted', id=graph_id)
         })
-        
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }), 500
+
+
+@graph_bp.route('/inject/graph', methods=['POST'])
+def inject_graph():
+    """기존 ZEP graph_id 를 재사용해 경량 project 를 발급한다 (FR-003, FR-003b, FR-009).
+
+    온톨로지 정의 생성(1단계)과 그래프 빌드(2단계)를 건너뛴다. graph_id 는 주입 시점에
+    동기 검증하며, 검증 실패 시 project/state/task 어떤 것도 생성하지 않고 거부한다.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        graph_id = (data.get('graph_id') or '').strip()
+        simulation_requirement = (data.get('simulation_requirement') or '').strip()
+        extracted_text = data.get('extracted_text')
+        name = data.get('name') or 'Injected Project'
+
+        # FR-003: simulation_requirement 필수 (생성 전에 거부)
+        if not simulation_requirement:
+            return jsonify({"success": False, "error": t('api.projectMissingRequirement')}), 400
+
+        # FR-003b: graph_id 동기 검증 — 부수효과(project 생성) 이전에 수행
+        try:
+            entity_count = validate_graph_id(graph_id)
+        except GraphInjectionError as ge:
+            return jsonify({"success": False, "error": str(ge)}), 400
+
+        # 검증 통과 후에만 경량 project 커밋
+        project = ProjectManager.create_project(name)
+        project.graph_id = graph_id
+        project.status = ProjectStatus.GRAPH_COMPLETED
+        project.simulation_requirement = simulation_requirement
+        project.source_type = "injected"
+        project.ontology_source = "zep_graph"
+        if extracted_text:
+            ProjectManager.save_extracted_text(project.project_id, extracted_text)
+        ProjectManager.save_project(project)
+
+        return jsonify({
+            "success": True,
+            "project_id": project.project_id,
+            "graph_id": graph_id,
+            "status": project.status.value,
+            "source_type": project.source_type,
+            "entity_count": entity_count,
+        })
+
     except Exception as e:
         return jsonify({
             "success": False,

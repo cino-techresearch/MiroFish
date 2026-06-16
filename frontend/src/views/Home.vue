@@ -245,12 +245,16 @@ const isDragOver = ref(false)
 // 文件输入引用
 const fileInput = ref(null)
 
-// 计算属性:是否可以提交
-// 온톨로지 주입 모드면 파일 대신 graph_id 가 있으면 제출 가능 (FR-008)
+// 计算属性:是否可以提交 (FR-008)
+// - 온톨로지 주입: graph_id 필요(문서 불필요)
+// - 온톨로지 생성: 문서 파일 필요
+// - 프로필 주입: profileFile 도 필요(주입 의도가 게이트에 반영되도록)
 const canSubmit = computed(() => {
+  const cfg = injectionConfig.value
   if (formData.value.simulationRequirement.trim() === '') return false
-  if (injectionConfig.value.ontologyMode === 'inject') {
-    return (injectionConfig.value.graphId || '').trim() !== ''
+  if (cfg.profileMode === 'inject' && !cfg.profileFile) return false
+  if (cfg.ontologyMode === 'inject') {
+    return (cfg.graphId || '').trim() !== ''
   }
   return files.value.length > 0
 })

@@ -19,11 +19,20 @@ export async function readProfilesFromFile(file) {
       reader.readAsText(file)
     })
   }
+  let parsed
   try {
-    return JSON.parse(text)
+    parsed = JSON.parse(text)
   } catch (e) {
     throw new Error('프로필 파일이 유효한 JSON 이 아닙니다: ' + e.message)
   }
+  // shape 검증: 비어 있지 않은 배열이어야 한다 (FR-004 fail-fast)
+  if (!Array.isArray(parsed)) {
+    throw new Error('프로필 파일은 JSON 배열이어야 합니다')
+  }
+  if (parsed.length === 0) {
+    throw new Error('프로필 파일이 비어 있습니다 (최소 1개 프로필 필요)')
+  }
+  return parsed
 }
 
 /**

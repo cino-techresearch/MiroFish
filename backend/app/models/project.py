@@ -51,7 +51,13 @@ class Project:
     
     # 错误信息
     error: Optional[str] = None
-    
+
+    # provenance（레이어 주입 추적, FR-009）
+    # source_type: "generated"(일반 파이프라인) | "injected"(graph_id/프로필 주입)
+    source_type: str = "generated"
+    ontology_source: Optional[str] = None  # 예: "llm" | "zep_graph"
+    profile_source: Optional[str] = None   # 예: "generated" | "file"
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
@@ -69,7 +75,10 @@ class Project:
             "simulation_requirement": self.simulation_requirement,
             "chunk_size": self.chunk_size,
             "chunk_overlap": self.chunk_overlap,
-            "error": self.error
+            "error": self.error,
+            "source_type": self.source_type,
+            "ontology_source": self.ontology_source,
+            "profile_source": self.profile_source
         }
     
     @classmethod
@@ -94,7 +103,10 @@ class Project:
             simulation_requirement=data.get('simulation_requirement'),
             chunk_size=data.get('chunk_size', 500),
             chunk_overlap=data.get('chunk_overlap', 50),
-            error=data.get('error')
+            error=data.get('error'),
+            source_type=data.get('source_type', 'generated'),
+            ontology_source=data.get('ontology_source'),
+            profile_source=data.get('profile_source')
         )
 
 

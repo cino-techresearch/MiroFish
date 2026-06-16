@@ -51,7 +51,7 @@
       <!-- Right Panel: Step Components -->
       <div class="panel-wrapper right" :style="rightPanelStyle">
         <!-- Step 1: 图谱构建 -->
-        <Step1GraphBuild 
+        <Step1GraphBuild
           v-if="currentStep === 1"
           :currentPhase="currentPhase"
           :projectData="projectData"
@@ -59,6 +59,7 @@
           :buildProgress="buildProgress"
           :graphData="graphData"
           :systemLogs="systemLogs"
+          :injectionConfig="injectionConfig"
           @next-step="handleNextStep"
         />
         <!-- Step 2: 环境搭建 -->
@@ -83,8 +84,10 @@ import { useI18n } from 'vue-i18n'
 import GraphPanel from '../components/GraphPanel.vue'
 import Step1GraphBuild from '../components/Step1GraphBuild.vue'
 import Step2EnvSetup from '../components/Step2EnvSetup.vue'
-import { generateOntology, getProject, buildGraph, getTaskStatus, getGraphData } from '../api/graph'
+import { generateOntology, getProject, buildGraph, getTaskStatus, getGraphData, injectGraph } from '../api/graph'
 import { getPendingUpload, clearPendingUpload } from '../store/pendingUpload'
+import { resolveOntologyAction, startInjection } from '../utils/projectStart'
+import { getWizardPlan } from '../utils/wizardSteps'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
 
 const route = useRoute()
@@ -109,6 +112,9 @@ const currentPhase = ref(-1) // -1: Upload, 0: Ontology, 1: Build, 2: Complete
 const ontologyProgress = ref(null)
 const buildProgress = ref(null)
 const systemLogs = ref([])
+
+// 레이어 주입 설정 (Home 에서 pendingUpload 로 전달됨, Step1 로 넘김)
+const injectionConfig = ref({ ontologyMode: 'generate', profileMode: 'generate', graphId: '', profileFile: null })
 
 // Polling timers
 let pollTimer = null
@@ -193,18 +199,57 @@ const initProject = async () => {
 
 const handleNewProject = async () => {
   const pending = getPendingUpload()
-  if (!pending.isPending || pending.files.length === 0) {
+  // Home 에서 전달된 주입 설정을 보관 (Step1 로 넘겨 프로필 주입에 사용)
+  injectionConfig.value = pending.injection || injectionConfig.value
+  const isOntologyInject = resolveOntologyAction(injectionConfig.value) === 'inject'
+
+  if (!pending.isPending || (!isOntologyInject && pending.files.length === 0)) {
     error.value = 'No pending files found.'
     addLog('Error: No pending files found for new project.')
     return
   }
-  
+
+  // FR-008: 온톨로지 주입 — 기존 graph_id 재사용(문서 업로드/그래프 빌드 스킵)
+  if (isOntologyInject) {
+    try {
+      loading.value = true
+      currentPhase.value = 0
+      ontologyProgress.value = { message: 'Reusing existing graph...' }
+      addLog(`Injecting existing graph_id: ${injectionConfig.value.graphId}`)
+      const resp = await startInjection(injectionConfig.value, pending.simulationRequirement, { injectGraph })
+      if (resp.success) {
+        clearPendingUpload()
+        currentProjectId.value = resp.project_id
+        // 주입 project 를 로드해 projectData 채움 (graph_id, status=graph_completed)
+        const pj = await getProject(resp.project_id)
+        projectData.value = pj.success ? pj.data : { project_id: resp.project_id, graph_id: resp.graph_id, status: 'graph_completed' }
+        router.replace({ name: 'Process', params: { projectId: resp.project_id } })
+        // FR-008: getWizardPlan 으로 스킵 스텝을 계산 — graphBuild 스킵 시 빌드 완료 단계로 진입
+        const plan = getWizardPlan(injectionConfig.value)
+        currentPhase.value = plan.skippedSteps.includes('graphBuild') ? 2 : 1
+        currentStep.value = 1  // 첫 활성 스텝(시뮬레이션 생성)
+        ontologyProgress.value = null
+        addLog(`Graph injected. project ${resp.project_id} ready for simulation.`)
+        await refreshGraph()
+      } else {
+        error.value = resp.error || 'Graph injection failed'
+        addLog(`Error injecting graph: ${error.value}`)
+      }
+    } catch (err) {
+      error.value = err.message
+      addLog(`Exception in graph injection: ${err.message}`)
+    } finally {
+      loading.value = false
+    }
+    return
+  }
+
   try {
     loading.value = true
     currentPhase.value = 0
     ontologyProgress.value = { message: 'Uploading and analyzing docs...' }
     addLog('Starting ontology generation: Uploading files...')
-    
+
     const formData = new FormData()
     pending.files.forEach(f => formData.append('files', f))
     formData.append('simulation_requirement', pending.simulationRequirement)

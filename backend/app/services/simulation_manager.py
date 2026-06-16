@@ -16,7 +16,10 @@ from ..config import Config
 from ..utils.logger import get_logger
 from .zep_entity_reader import ZepEntityReader, FilteredEntities
 from .oasis_profile_generator import OasisProfileGenerator, OasisAgentProfile
+from .profile_source import FileProfileSource, GeneratedProfileSource
+from .injection_consistency import validate_injection_consistency, InjectionConsistencyError
 from .simulation_config_generator import SimulationConfigGenerator, SimulationParameters
+from ..models.project import ProjectManager
 from ..utils.locale import t
 
 logger = get_logger('mirofish.simulation')
@@ -295,12 +298,18 @@ class SimulationManager:
                     total=filtered.filtered_count
                 )
             
-            if filtered.filtered_count == 0:
+            # 주입 프로필 경로 여부를 엔티티-0 가드보다 먼저 판정한다 (FR-005).
+            # 주입 경로는 엔티티-0이어도 generic "엔티티 없음" 으로 선점되지 않고,
+            # 아래 cheap pre-check(프로필 수 != 엔티티 수)가 더 명확한 사유로 처리한다.
+            injected_profiles_path = os.path.join(sim_dir, "injected_profiles.json")
+            is_injected_profiles = os.path.exists(injected_profiles_path)
+
+            if filtered.filtered_count == 0 and not is_injected_profiles:
                 state.status = SimulationStatus.FAILED
                 state.error = "没有找到符合条件的实体，请检查图谱是否正确构建"
                 self._save_simulation_state(state)
                 return state
-            
+
             # ========== 阶段2: 生成Agent Profile ==========
             total_entities = len(filtered.entities)
             
@@ -312,42 +321,71 @@ class SimulationManager:
                     total=total_entities
                 )
             
-            # 传入graph_id以启用Zep检索功能，获取更丰富的上下文
-            generator = OasisProfileGenerator(graph_id=state.graph_id)
-            
             def profile_progress(current, total, msg):
                 if progress_callback:
                     progress_callback(
-                        "generating_profiles", 
-                        int(current / total * 100), 
+                        "generating_profiles",
+                        int(current / total * 100),
                         msg,
                         current=current,
                         total=total,
                         item_name=msg
                     )
-            
-            # 设置实时保存的文件路径（优先使用 Reddit JSON 格式）
-            realtime_output_path = None
-            realtime_platform = "reddit"
-            if state.enable_reddit:
-                realtime_output_path = os.path.join(sim_dir, "reddit_profiles.json")
+
+            # ProfileSource 분기 (FR-005, FR-011):
+            # injected_profiles.json 이 있으면 주입 프로필을 로드(LLM 0회)하고 생성을 건너뛴다.
+            # 그 외에는 현행 ZEP 엔티티 기반 생성 경로를 사용한다.
+            if is_injected_profiles:
+                profiles = FileProfileSource(profiles_path=injected_profiles_path).load_profiles()
+                # OASIS 정합(FR-005): OASIS 는 agent_id 를 프로필 *위치*(0..N-1)로 부여한다.
+                # 임의 개수 주입은 허용하되, user_id 를 위치 인덱스로 정규화해 agent_id/
+                # 저장 user_id/poster_agent_id 가 모두 OASIS 위치와 일치하게 한다.
+                for idx, p in enumerate(profiles):
+                    p.user_id = idx
+                # 저장은 LLM 키 없이 가능한 serializer 만 사용 (generator __init__ 우회)
+                saver = OasisProfileGenerator.__new__(OasisProfileGenerator)
+            else:
+                # 传入graph_id以启用Zep检索功能，获取更丰富的上下文
+                generator = OasisProfileGenerator(graph_id=state.graph_id)
+
+                # 设置实时保存的文件路径（优先使用 Reddit JSON 格式）
+                realtime_output_path = None
                 realtime_platform = "reddit"
-            elif state.enable_twitter:
-                realtime_output_path = os.path.join(sim_dir, "twitter_profiles.csv")
-                realtime_platform = "twitter"
-            
-            profiles = generator.generate_profiles_from_entities(
-                entities=filtered.entities,
-                use_llm=use_llm_for_profiles,
-                progress_callback=profile_progress,
-                graph_id=state.graph_id,  # 传入graph_id用于Zep检索
-                parallel_count=parallel_profile_count,  # 并行生成数量
-                realtime_output_path=realtime_output_path,  # 实时保存路径
-                output_platform=realtime_platform  # 输出格式
-            )
-            
+                if state.enable_reddit:
+                    realtime_output_path = os.path.join(sim_dir, "reddit_profiles.json")
+                    realtime_platform = "reddit"
+                elif state.enable_twitter:
+                    realtime_output_path = os.path.join(sim_dir, "twitter_profiles.csv")
+                    realtime_platform = "twitter"
+
+                # GeneratedProfileSource 어댑터를 통해 생성 (생성 경로도 ProfileSource 추상 사용)
+                gen_source = GeneratedProfileSource(
+                    entities=filtered.entities,
+                    use_llm=use_llm_for_profiles,
+                    progress_callback=profile_progress,
+                    graph_id=state.graph_id,
+                    parallel_count=parallel_profile_count,
+                    realtime_output_path=realtime_output_path,
+                    output_platform=realtime_platform,
+                    generator=generator,
+                )
+                profiles = gen_source.load_profiles()
+                saver = generator
+
             state.profiles_count = len(profiles)
-            
+
+            # FR-009: profile layer provenance 기록 (주입=file / 생성=generated)
+            try:
+                _proj = ProjectManager.get_project(state.project_id)
+                if _proj is not None:
+                    _proj.profile_source = "file" if is_injected_profiles else "generated"
+                    ProjectManager.save_project(_proj)
+            except Exception as _e:
+                logger.warning(f"profile_source provenance 기록 실패: {_e}")
+
+            # FR-005 재설계: 주입 프로필은 임의 개수 허용 — agent_config 를 프로필에서 파생하므로
+            # ZEP 엔티티 수와의 일치 요구를 제거한다(아래 generate_config 에 agent_profiles 전달).
+
             # 保存Profile文件（注意：Twitter使用CSV格式，Reddit使用JSON格式）
             # Reddit 已经在生成过程中实时保存了，这里再保存一次确保完整性
             if progress_callback:
@@ -359,15 +397,15 @@ class SimulationManager:
                 )
             
             if state.enable_reddit:
-                generator.save_profiles(
+                saver.save_profiles(
                     profiles=profiles,
                     file_path=os.path.join(sim_dir, "reddit_profiles.json"),
                     platform="reddit"
                 )
-            
+
             if state.enable_twitter:
                 # Twitter使用CSV格式！这是OASIS的要求
-                generator.save_profiles(
+                saver.save_profiles(
                     profiles=profiles,
                     file_path=os.path.join(sim_dir, "twitter_profiles.csv"),
                     platform="twitter"
@@ -408,7 +446,9 @@ class SimulationManager:
                 document_text=document_text,
                 entities=filtered.entities,
                 enable_twitter=state.enable_twitter,
-                enable_reddit=state.enable_reddit
+                enable_reddit=state.enable_reddit,
+                # FR-005 재설계: 주입 프로필이면 agent_config 를 프로필에서 파생(엔티티 수 무관)
+                agent_profiles=profiles if is_injected_profiles else None,
             )
             
             if progress_callback:
@@ -426,7 +466,34 @@ class SimulationManager:
             
             state.config_generated = True
             state.config_reasoning = sim_params.generation_reasoning
-            
+
+            # FR-012: 프로필 주입 경로면 주입 프로필 ↔ agent_configs ↔ initial_posts 정합성 fail-fast
+            if os.path.exists(injected_profiles_path):
+                event_config = getattr(sim_params, "event_config", None)
+                initial_posts = getattr(event_config, "initial_posts", []) if event_config else []
+                try:
+                    validate_injection_consistency(
+                        profiles,
+                        getattr(sim_params, "agent_configs", []),
+                        initial_posts,
+                    )
+                except InjectionConsistencyError as ce:
+                    # 부분 산출물 정리: config_generated 를 내리고 생성된 산출물(config + 프로필 파일) 제거.
+                    # (이렇게 해야 _check_simulation_prepared 가 이 FAILED 를 "준비됨"으로 오판하지 않음)
+                    state.config_generated = False
+                    for _stale in (config_path,
+                                   os.path.join(sim_dir, "reddit_profiles.json"),
+                                   os.path.join(sim_dir, "twitter_profiles.csv")):
+                        try:
+                            if os.path.exists(_stale):
+                                os.remove(_stale)
+                        except OSError:
+                            pass
+                    state.status = SimulationStatus.FAILED
+                    state.error = str(ce)
+                    self._save_simulation_state(state)
+                    return state
+
             if progress_callback:
                 progress_callback(
                     "generating_config", 100,

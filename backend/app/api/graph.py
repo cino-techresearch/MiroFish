@@ -10,7 +10,7 @@ from flask import request, jsonify
 
 from . import graph_bp
 from ..config import Config
-from ..services.ontology_generator import OntologyGenerator
+from ..services.ontology_source import LLMOntologySource, ZepGraphOntologySource
 from ..services.graph_builder import GraphBuilderService
 from ..services.text_processor import TextProcessor
 from ..utils.file_parser import FileParser
@@ -18,6 +18,7 @@ from ..utils.logger import get_logger
 from ..utils.locale import t, get_locale, set_locale
 from ..models.task import TaskManager, TaskStatus
 from ..models.project import ProjectManager, ProjectStatus
+from ..services.graph_injection import validate_graph_id, GraphInjectionError
 
 # 获取日志器
 logger = get_logger('mirofish.api')
@@ -98,6 +99,13 @@ def reset_project(project_id: str):
             "success": False,
             "error": t('api.projectNotFound', id=project_id)
         }), 404
+
+    # FR-010: 주입 project 는 ontology/text 가 없어 reset 대상이 아니다 — 거부(graph_id 보존)
+    if getattr(project, "source_type", "generated") == "injected":
+        return jsonify({
+            "success": False,
+            "error": t('api.injectedProjectNotResettable')
+        }), 400
 
     # 重置到本体已生成状态
     if project.ontology:
@@ -212,14 +220,13 @@ def generate_ontology():
         ProjectManager.save_extracted_text(project.project_id, all_text)
         logger.info(f"文本提取完成，共 {len(all_text)} 字符")
         
-        # 生成本体
+        # 生成本体 (OntologySource 추상 사용 — FR-001)
         logger.info("调用 LLM 生成本体定义...")
-        generator = OntologyGenerator()
-        ontology = generator.generate(
+        ontology = LLMOntologySource(
             document_texts=document_texts,
             simulation_requirement=simulation_requirement,
-            additional_context=additional_context if additional_context else None
-        )
+            additional_context=additional_context if additional_context else None,
+        ).load()
         
         # 保存本体到项目
         entity_count = len(ontology.get("entity_types", []))
@@ -282,18 +289,7 @@ def build_graph():
     """
     try:
         logger.info("=== 开始构建图谱 ===")
-        
-        # 检查配置
-        errors = []
-        if not Config.ZEP_API_KEY:
-            errors.append(t('api.zepApiKeyMissing'))
-        if errors:
-            logger.error(f"配置错误: {errors}")
-            return jsonify({
-                "success": False,
-                "error": t('api.configError', details="; ".join(errors))
-            }), 500
-        
+
         # 解析请求
         data = request.get_json() or {}
         project_id = data.get('project_id')
@@ -313,9 +309,28 @@ def build_graph():
                 "error": t('api.projectNotFound', id=project_id)
             }), 404
 
+        # FR-010: 주입 project 는 외부 graph_id 재사용 — 빌드/재빌드 대상이 아니다. 거부(graph_id 보존)
+        # ZEP 설정 체크보다 먼저 평가해, ZEP 미설정 환경에서도 주입 project 를 명확히 거부한다.
+        if getattr(project, "source_type", "generated") == "injected":
+            return jsonify({
+                "success": False,
+                "error": t('api.injectedProjectNotBuildable')
+            }), 400
+
+        # 检查配置 (생성 project 의 그래프 빌드에만 필요)
+        errors = []
+        if not Config.ZEP_API_KEY:
+            errors.append(t('api.zepApiKeyMissing'))
+        if errors:
+            logger.error(f"配置错误: {errors}")
+            return jsonify({
+                "success": False,
+                "error": t('api.configError', details="; ".join(errors))
+            }), 500
+
         # 检查项目状态
         force = data.get('force', False)  # 强制重新构建
-        
+
         if project.status == ProjectStatus.CREATED:
             return jsonify({
                 "success": False,
@@ -613,7 +628,65 @@ def delete_graph(graph_id: str):
             "success": True,
             "message": t('api.graphDeleted', id=graph_id)
         })
-        
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }), 500
+
+
+@graph_bp.route('/inject/graph', methods=['POST'])
+def inject_graph():
+    """기존 ZEP graph_id 를 재사용해 경량 project 를 발급한다 (FR-003, FR-003b, FR-009).
+
+    온톨로지 정의 생성(1단계)과 그래프 빌드(2단계)를 건너뛴다. graph_id 는 주입 시점에
+    동기 검증하며, 검증 실패 시 project/state/task 어떤 것도 생성하지 않고 거부한다.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        graph_id = (data.get('graph_id') or '').strip()
+        simulation_requirement = (data.get('simulation_requirement') or '').strip()
+        extracted_text = data.get('extracted_text')
+        name = data.get('name') or 'Injected Project'
+
+        # FR-003: simulation_requirement 필수 (생성 전에 거부)
+        if not simulation_requirement:
+            return jsonify({"success": False, "error": t('api.projectMissingRequirement')}), 400
+
+        # FR-003b: graph_id 동기 검증 — 부수효과(project 생성) 이전에 수행
+        try:
+            entity_count = validate_graph_id(graph_id)
+        except GraphInjectionError as ge:
+            return jsonify({"success": False, "error": str(ge)}), 400
+
+        # 검증 통과 후에만 경량 project 커밋
+        project = ProjectManager.create_project(name)
+        project.graph_id = graph_id
+        project.status = ProjectStatus.GRAPH_COMPLETED
+        project.simulation_requirement = simulation_requirement
+        project.source_type = "injected"
+        project.ontology_source = "zep_graph"
+        # FR-001: 재사용 graph 에서 온톨로지(entity_types)를 파생해 project.ontology 채움.
+        # ZEP 미가용 환경에서는 best-effort 로 생략(주입 자체는 성공).
+        try:
+            project.ontology = ZepGraphOntologySource(graph_id).load()
+        except Exception as oe:
+            logger.warning(f"주입 graph 온톨로지 파생 생략(ZEP 미가용 등): {oe}")
+        if extracted_text:
+            ProjectManager.save_extracted_text(project.project_id, extracted_text)
+        ProjectManager.save_project(project)
+
+        return jsonify({
+            "success": True,
+            "project_id": project.project_id,
+            "graph_id": graph_id,
+            "status": project.status.value,
+            "source_type": project.source_type,
+            "entity_count": entity_count,
+        })
+
     except Exception as e:
         return jsonify({
             "success": False,

@@ -1106,13 +1106,19 @@ class OasisProfileGenerator:
                 
                 # description: 简短简介，用于外部显示
                 description = profile.bio.replace('\n', ' ').replace('\r', ' ')
-                
+
+                # CSV formula injection 방어: =,+,-,@,탭,CR 로 시작하는 셀에 선행 작은따옴표.
+                # (주입 프로필의 bio/persona 가 외부 입력이므로 스프레드시트에서 수식 실행 방지)
+                def _csv_safe(v):
+                    s = str(v)
+                    return "'" + s if s and s[0] in ('=', '+', '-', '@', '\t', '\r') else s
+
                 row = [
-                    idx,                    # user_id: 从0开始的顺序ID
-                    profile.name,           # name: 真实姓名
-                    profile.user_name,      # username: 用户名
-                    user_char,              # user_char: 完整人设（内部LLM使用）
-                    description             # description: 简短简介（外部显示）
+                    idx,                              # user_id: 从0开始的顺序ID
+                    _csv_safe(profile.name),          # name: 真实姓名
+                    _csv_safe(profile.user_name),     # username: 用户名
+                    _csv_safe(user_char),             # user_char: 完整人设（内部LLM使用）
+                    _csv_safe(description)            # description: 简短简介（外部显示）
                 ]
                 writer.writerow(row)
         

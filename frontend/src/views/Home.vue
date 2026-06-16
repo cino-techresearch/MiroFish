@@ -189,6 +189,11 @@
               </div>
             </div>
 
+            <!-- 레이어 주입 옵션 (FR-008) -->
+            <div class="console-section">
+              <InjectionPanel @change="onInjectionChange" />
+            </div>
+
             <!-- 启动按钮 -->
             <div class="console-section btn-section">
               <button 
@@ -216,6 +221,7 @@ import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import HistoryDatabase from '../components/HistoryDatabase.vue'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
+import InjectionPanel from '../components/InjectionPanel.vue'
 
 const router = useRouter()
 
@@ -227,6 +233,10 @@ const formData = ref({
 // 文件列表
 const files = ref([])
 
+// 레이어 주입 설정 (FR-008)
+const injectionConfig = ref({ ontologyMode: 'generate', profileMode: 'generate', graphId: '', profileFile: null })
+const onInjectionChange = (cfg) => { injectionConfig.value = cfg }
+
 // 状态
 const loading = ref(false)
 const error = ref('')
@@ -235,9 +245,18 @@ const isDragOver = ref(false)
 // 文件输入引用
 const fileInput = ref(null)
 
-// 计算属性:是否可以提交
+// 计算属性:是否可以提交 (FR-008)
+// - 온톨로지 주입: graph_id 필요(문서 불필요)
+// - 온톨로지 생성: 문서 파일 필요
+// - 프로필 주입: profileFile 도 필요(주입 의도가 게이트에 반영되도록)
 const canSubmit = computed(() => {
-  return formData.value.simulationRequirement.trim() !== '' && files.value.length > 0
+  const cfg = injectionConfig.value
+  if (formData.value.simulationRequirement.trim() === '') return false
+  if (cfg.profileMode === 'inject' && !cfg.profileFile) return false
+  if (cfg.ontologyMode === 'inject') {
+    return (cfg.graphId || '').trim() !== ''
+  }
+  return files.value.length > 0
 })
 
 // 触发文件选择
@@ -298,10 +317,10 @@ const scrollToBottom = () => {
 const startSimulation = () => {
   if (!canSubmit.value || loading.value) return
   
-  // 存储待上传的数据
+  // 存储待上传的数据 + 주입 설정
   import('../store/pendingUpload.js').then(({ setPendingUpload }) => {
-    setPendingUpload(files.value, formData.value.simulationRequirement)
-    
+    setPendingUpload(files.value, formData.value.simulationRequirement, injectionConfig.value)
+
     // 立即跳转到Process页面（使用特殊标识表示新建项目）
     router.push({
       name: 'Process',

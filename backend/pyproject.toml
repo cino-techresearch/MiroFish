@@ -53,3 +53,8 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "scripts"]
+pythonpath = ["."]
+addopts = "-ra"

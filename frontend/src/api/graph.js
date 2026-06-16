@@ -68,3 +68,12 @@ export function getProject(projectId) {
     method: 'get'
   })
 }
+
+/**
+ * 기존 ZEP graph_id 주입 (온톨로지 레이어 재사용, FR-003/FR-008)
+ * @param {Object} data - { graph_id, simulation_requirement, extracted_text? }
+ * @returns {Promise}
+ */
+export function injectGraph(data) {
+  return service.post('/api/graph/inject/graph', data)
+}

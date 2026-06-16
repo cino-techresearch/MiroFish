@@ -3,7 +3,9 @@
 Step2: Zep实体读取与过滤、OASIS模拟准备与运行（全程自动化）
 """
 
+import json
 import os
+import re
 import traceback
 from flask import request, jsonify, send_file
 
@@ -13,9 +15,13 @@ from ..services.zep_entity_reader import ZepEntityReader
 from ..services.oasis_profile_generator import OasisProfileGenerator
 from ..services.simulation_manager import SimulationManager, SimulationStatus
 from ..services.simulation_runner import SimulationRunner, RunnerStatus
+from ..services.profile_validator import validate_profiles, ProfileValidationError
 from ..utils.logger import get_logger
 from ..utils.locale import t, get_locale, set_locale
 from ..models.project import ProjectManager
+
+# 안전한 simulation_id 패턴 (경로 traversal 차단)
+_SAFE_SIM_ID = re.compile(r'^[A-Za-z0-9_-]+$')
 
 logger = get_logger('mirofish.api.simulation')
 
@@ -307,8 +313,10 @@ def _check_simulation_prepared(simulation_id: str) -> tuple:
         # - running: 正在运行，说明准备早就完成了
         # - completed: 运行完成，说明准备早就完成了
         # - stopped: 已停止，说明准备早就完成了
-        # - failed: 运行失败（但准备是完成的）
-        prepared_statuses = ["ready", "preparing", "running", "completed", "stopped", "failed"]
+        # 注意: "failed" 는 준비 완료로 보지 않는다 — 정합성 실패 등으로 FAILED 된 주입 경로가
+        # 부분 산출물(config_generated=True)만으로 "이미 준비됨"으로 오판되어 재-prepare 를
+        # 막는 것을 방지한다. failed 는 force_regenerate 로 재시도해야 한다.
+        prepared_statuses = ["ready", "preparing", "running", "completed", "stopped"]
         if status in prepared_statuses and config_generated:
             # 获取文件统计信息
             profiles_file = os.path.join(simulation_dir, "reddit_profiles.json")
@@ -320,18 +328,11 @@ def _check_simulation_prepared(simulation_id: str) -> tuple:
                     profiles_data = json.load(f)
                     profiles_count = len(profiles_data) if isinstance(profiles_data, list) else 0
             
-            # 如果状态是preparing但文件已完成，自动更新状态为ready
+            # TS-015 / FR-007: 이 함수는 read-only 다 — state.json 을 mutate 하지 않는다.
+            # 상태 전이(preparing -> ready)는 prepare_simulation 이 명시적으로 소유한다.
+            # preparing + config_generated + 파일 존재면 "준비됨"으로 *보고만* 한다(디스크 미변경).
             if status == "preparing":
-                try:
-                    state_data["status"] = "ready"
-                    from datetime import datetime
-                    state_data["updated_at"] = datetime.now().isoformat()
-                    with open(state_file, 'w', encoding='utf-8') as f:
-                        json.dump(state_data, f, ensure_ascii=False, indent=2)
-                    logger.info(f"自动更新模拟状态: {simulation_id} preparing -> ready")
-                    status = "ready"
-                except Exception as e:
-                    logger.warning(f"自动更新状态失败: {e}")
+                status = "ready"
             
             logger.info(f"模拟 {simulation_id} 检测结果: 已准备完成 (status={status}, config_generated={config_generated})")
             return True, {
@@ -2709,6 +2710,75 @@ def close_simulation_env():
         
     except Exception as e:
         logger.error(f"关闭环境失败: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }), 500
+
+
+@simulation_bp.route('/profiles/upload', methods=['POST'])
+def upload_profiles():
+    """중립 JSON 프로필을 주입해 injected_profiles.json 으로 저장한다 (FR-004, NFR-004).
+
+    입력(둘 중 하나):
+    - JSON body: {"simulation_id": "...", "profiles": [ {...}, ... ]}
+    - multipart/form-data: simulation_id 필드 + file(.json)
+
+    보안: 크기 초과(413, Flask MAX_CONTENT_LENGTH) / 비-JSON 확장자(400) /
+    스키마 위반(400) / 경로 traversal(400).
+    """
+    try:
+        # simulation_id 수집 (form 우선, 그다음 json)
+        simulation_id = (request.form.get('simulation_id')
+                         or (request.get_json(silent=True) or {}).get('simulation_id')
+                         or '')
+        simulation_id = str(simulation_id).strip()
+
+        # 경로 traversal 차단 — 화이트리스트 패턴만 허용
+        if not simulation_id or not _SAFE_SIM_ID.match(simulation_id):
+            return jsonify({"success": False, "error": t('api.invalidSimulationId')}), 400
+
+        # 존재하는 simulation 에만 업로드 허용 (고아 디렉터리/타 sim 입력 교체 방지)
+        manager = SimulationManager()
+        if manager.get_simulation(simulation_id) is None:
+            return jsonify({"success": False, "error": t('api.simulationNotFound', id=simulation_id)}), 404
+
+        # 프로필 데이터 수집
+        if 'file' in request.files:
+            up = request.files['file']
+            filename = up.filename or ''
+            if not filename.lower().endswith('.json'):
+                return jsonify({"success": False, "error": t('api.invalidProfileFileType')}), 400
+            try:
+                profiles = json.loads(up.read().decode('utf-8'))
+            except (ValueError, UnicodeDecodeError):
+                return jsonify({"success": False, "error": t('api.invalidProfileJson')}), 400
+        else:
+            body = request.get_json(silent=True) or {}
+            profiles = body.get('profiles')
+
+        # 스키마 검증 (fail-fast)
+        try:
+            validate_profiles(profiles)
+        except ProfileValidationError as ve:
+            return jsonify({"success": False, "error": str(ve)}), 400
+
+        # injected_profiles.json 으로 저장
+        sim_dir = manager._get_simulation_dir(simulation_id)
+        os.makedirs(sim_dir, exist_ok=True)
+        out_path = os.path.join(sim_dir, 'injected_profiles.json')
+        with open(out_path, 'w', encoding='utf-8') as f:
+            json.dump(profiles, f, ensure_ascii=False, indent=2)
+
+        return jsonify({
+            "success": True,
+            "simulation_id": simulation_id,
+            "count": len(profiles),
+            "path": out_path,
+        })
+
+    except Exception as e:
         return jsonify({
             "success": False,
             "error": str(e),

@@ -190,7 +190,8 @@
 import { computed, ref, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { createSimulation } from '../api/simulation'
+import { createSimulation, uploadProfiles } from '../api/simulation'
+import { submitInjectedProfiles } from '../utils/profileUpload'
 
 const router = useRouter()
 const { t } = useI18n()
@@ -201,7 +202,9 @@ const props = defineProps({
   ontologyProgress: Object,
   buildProgress: Object,
   graphData: Object,
-  systemLogs: { type: Array, default: () => [] }
+  systemLogs: { type: Array, default: () => [] },
+  // 레이어 주입 설정 (FR-008): profileMode='inject' 시 profileFile 을 업로드
+  injectionConfig: { type: Object, default: () => ({ ontologyMode: 'generate', profileMode: 'generate', profileFile: null }) }
 })
 
 defineEmits(['next-step'])
@@ -228,10 +231,22 @@ const handleEnterEnvSetup = async () => {
     })
     
     if (res.success && res.data?.simulation_id) {
+      const simulationId = res.data.simulation_id
+
+      // FR-004/FR-008: 프로필 주입 모드면 중립 JSON 프로필을 업로드(injected_profiles.json)
+      if (props.injectionConfig?.profileMode === 'inject' && props.injectionConfig?.profileFile) {
+        const up = await submitInjectedProfiles(simulationId, props.injectionConfig.profileFile, { uploadProfiles })
+        if (!up.success) {
+          alert(t('step1.createSimulationFailed', { error: up.error || t('common.unknownError') }))
+          creatingSimulation.value = false
+          return
+        }
+      }
+
       // 跳转到 simulation 页面
       router.push({
         name: 'Simulation',
-        params: { simulationId: res.data.simulation_id }
+        params: { simulationId }
       })
     } else {
       console.error('创建模拟失败:', res.error)

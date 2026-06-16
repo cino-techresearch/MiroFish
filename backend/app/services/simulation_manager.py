@@ -378,17 +378,9 @@ class SimulationManager:
             except Exception as _e:
                 logger.warning(f"profile_source provenance 기록 실패: {_e}")
 
-            # FR-012 cheap pre-check: 주입 프로필 수가 ZEP 엔티티 수와 다르면
-            # config LLM 호출 *이전* 에 fail-fast 로 거부한다(비용 절약 + 부분 산출물 방지).
-            if os.path.exists(injected_profiles_path) and len(profiles) != filtered.filtered_count:
-                state.status = SimulationStatus.FAILED
-                state.error = (
-                    f"주입 프로필 수({len(profiles)})가 그래프 엔티티 수({filtered.filtered_count})와 "
-                    f"다릅니다. 주입 프로필은 엔티티 수와 일치해야 하며 user_id 는 0-기반 연속이어야 합니다."
-                )
-                self._save_simulation_state(state)
-                return state
-            
+            # FR-005 재설계: 주입 프로필은 임의 개수 허용 — agent_config 를 프로필에서 파생하므로
+            # ZEP 엔티티 수와의 일치 요구를 제거한다(아래 generate_config 에 agent_profiles 전달).
+
             # 保存Profile文件（注意：Twitter使用CSV格式，Reddit使用JSON格式）
             # Reddit 已经在生成过程中实时保存了，这里再保存一次确保完整性
             if progress_callback:
@@ -449,7 +441,9 @@ class SimulationManager:
                 document_text=document_text,
                 entities=filtered.entities,
                 enable_twitter=state.enable_twitter,
-                enable_reddit=state.enable_reddit
+                enable_reddit=state.enable_reddit,
+                # FR-005 재설계: 주입 프로필이면 agent_config 를 프로필에서 파생(엔티티 수 무관)
+                agent_profiles=profiles if is_injected_profiles else None,
             )
             
             if progress_callback:

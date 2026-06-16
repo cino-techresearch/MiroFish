@@ -251,6 +251,7 @@ class SimulationConfigGenerator:
         enable_twitter: bool = True,
         enable_reddit: bool = True,
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
+        agent_profiles: Optional[List[Any]] = None,
     ) -> SimulationParameters:
         """
         智能生成完整的模拟配置（分步生成）
@@ -305,27 +306,36 @@ class SimulationConfigGenerator:
         event_config = self._parse_event_config(event_config_result)
         reasoning_parts.append(f"{t('progress.eventConfigLabel')}: {event_config_result.get('reasoning', t('common.success'))}")
         
-        # ========== 步骤3-N: 分批生成Agent配置 ==========
-        all_agent_configs = []
-        for batch_idx in range(num_batches):
-            start_idx = batch_idx * self.AGENTS_PER_BATCH
-            end_idx = min(start_idx + self.AGENTS_PER_BATCH, len(entities))
-            batch_entities = entities[start_idx:end_idx]
-            
-            report_progress(
-                3 + batch_idx,
-                t('progress.generatingAgentConfig', start=start_idx + 1, end=end_idx, total=len(entities))
+        # ========== 步骤3-N: Agent 설정 ==========
+        if agent_profiles is not None:
+            # FR-005 재설계: 프로필 주입 시 agent_config 를 주입 프로필에서 직접 파생한다.
+            # ZEP 엔티티 수와 무관하게 임의 개수/임의 user_id 를 허용하며 LLM 을 호출하지 않는다.
+            all_agent_configs = self._agent_configs_from_profiles(agent_profiles)
+            reasoning_parts.append(
+                t('progress.agentConfigResult', count=len(all_agent_configs))
+                + " (injected profiles)"
             )
-            
-            batch_configs = self._generate_agent_configs_batch(
-                context=context,
-                entities=batch_entities,
-                start_idx=start_idx,
-                simulation_requirement=simulation_requirement
-            )
-            all_agent_configs.extend(batch_configs)
-        
-        reasoning_parts.append(t('progress.agentConfigResult', count=len(all_agent_configs)))
+        else:
+            all_agent_configs = []
+            for batch_idx in range(num_batches):
+                start_idx = batch_idx * self.AGENTS_PER_BATCH
+                end_idx = min(start_idx + self.AGENTS_PER_BATCH, len(entities))
+                batch_entities = entities[start_idx:end_idx]
+
+                report_progress(
+                    3 + batch_idx,
+                    t('progress.generatingAgentConfig', start=start_idx + 1, end=end_idx, total=len(entities))
+                )
+
+                batch_configs = self._generate_agent_configs_batch(
+                    context=context,
+                    entities=batch_entities,
+                    start_idx=start_idx,
+                    simulation_requirement=simulation_requirement
+                )
+                all_agent_configs.extend(batch_configs)
+
+            reasoning_parts.append(t('progress.agentConfigResult', count=len(all_agent_configs)))
         
         # ========== 为初始帖子分配发布者 Agent ==========
         logger.info("为初始帖子分配合适的发布者 Agent...")
@@ -810,6 +820,23 @@ class SimulationConfigGenerator:
         event_config.initial_posts = updated_posts
         return event_config
     
+    def _agent_configs_from_profiles(self, profiles: List[Any]) -> List[AgentActivityConfig]:
+        """주입 프로필에서 agent_config 를 직접 파생한다 (FR-005 재설계, LLM 0회).
+
+        agent_id 는 프로필 user_id 를 그대로 사용하므로 ZEP 엔티티 수/0-기반 연속과 무관하게
+        임의 개수·임의 user_id 의 프로필 주입을 허용한다. 활동 파라미터는 dataclass 기본값.
+        """
+        configs: List[AgentActivityConfig] = []
+        for p in profiles:
+            etype = getattr(p, "source_entity_type", None) or "person"
+            configs.append(AgentActivityConfig(
+                agent_id=p.user_id,
+                entity_uuid=getattr(p, "source_entity_uuid", None) or "",
+                entity_name=p.name,
+                entity_type=str(etype).lower(),
+            ))
+        return configs
+
     def _generate_agent_configs_batch(
         self,
         context: str,

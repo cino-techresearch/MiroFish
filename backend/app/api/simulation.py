@@ -2739,6 +2739,11 @@ def upload_profiles():
         if not simulation_id or not _SAFE_SIM_ID.match(simulation_id):
             return jsonify({"success": False, "error": t('api.invalidSimulationId')}), 400
 
+        # 존재하는 simulation 에만 업로드 허용 (고아 디렉터리/타 sim 입력 교체 방지)
+        manager = SimulationManager()
+        if manager.get_simulation(simulation_id) is None:
+            return jsonify({"success": False, "error": t('api.simulationNotFound', id=simulation_id)}), 404
+
         # 프로필 데이터 수집
         if 'file' in request.files:
             up = request.files['file']
@@ -2760,7 +2765,6 @@ def upload_profiles():
             return jsonify({"success": False, "error": str(ve)}), 400
 
         # injected_profiles.json 으로 저장
-        manager = SimulationManager()
         sim_dir = manager._get_simulation_dir(simulation_id)
         os.makedirs(sim_dir, exist_ok=True)
         out_path = os.path.join(sim_dir, 'injected_profiles.json')

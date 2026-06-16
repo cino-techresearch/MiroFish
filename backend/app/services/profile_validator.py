@@ -35,6 +35,8 @@ def validate_profiles(profiles: Any) -> None:
         raise ProfileValidationError(
             f"프로필은 리스트여야 합니다 (받은 타입: {type(profiles).__name__})"
         )
+    if len(profiles) == 0:
+        raise ProfileValidationError("프로필이 비어 있습니다 (최소 1개 프로필 필요)")
 
     errors: List[str] = []
     seen_user_ids: set = set()

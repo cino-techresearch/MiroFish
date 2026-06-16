@@ -359,6 +359,17 @@ class SimulationManager:
                 saver = generator
 
             state.profiles_count = len(profiles)
+
+            # FR-012 cheap pre-check: 주입 프로필 수가 ZEP 엔티티 수와 다르면
+            # config LLM 호출 *이전* 에 fail-fast 로 거부한다(비용 절약 + 부분 산출물 방지).
+            if os.path.exists(injected_profiles_path) and len(profiles) != filtered.filtered_count:
+                state.status = SimulationStatus.FAILED
+                state.error = (
+                    f"주입 프로필 수({len(profiles)})가 그래프 엔티티 수({filtered.filtered_count})와 "
+                    f"다릅니다. 주입 프로필은 엔티티 수와 일치해야 하며 user_id 는 0-기반 연속이어야 합니다."
+                )
+                self._save_simulation_state(state)
+                return state
             
             # 保存Profile文件（注意：Twitter使用CSV格式，Reddit使用JSON格式）
             # Reddit 已经在生成过程中实时保存了，这里再保存一次确保完整性

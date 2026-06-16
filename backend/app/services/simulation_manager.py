@@ -17,6 +17,7 @@ from ..utils.logger import get_logger
 from .zep_entity_reader import ZepEntityReader, FilteredEntities
 from .oasis_profile_generator import OasisProfileGenerator, OasisAgentProfile
 from .profile_source import FileProfileSource
+from .injection_consistency import validate_injection_consistency, InjectionConsistencyError
 from .simulation_config_generator import SimulationConfigGenerator, SimulationParameters
 from ..utils.locale import t
 
@@ -437,7 +438,23 @@ class SimulationManager:
             
             state.config_generated = True
             state.config_reasoning = sim_params.generation_reasoning
-            
+
+            # FR-012: 프로필 주입 경로면 주입 프로필 ↔ agent_configs ↔ initial_posts 정합성 fail-fast
+            if os.path.exists(injected_profiles_path):
+                event_config = getattr(sim_params, "event_config", None)
+                initial_posts = getattr(event_config, "initial_posts", []) if event_config else []
+                try:
+                    validate_injection_consistency(
+                        profiles,
+                        getattr(sim_params, "agent_configs", []),
+                        initial_posts,
+                    )
+                except InjectionConsistencyError as ce:
+                    state.status = SimulationStatus.FAILED
+                    state.error = str(ce)
+                    self._save_simulation_state(state)
+                    return state
+
             if progress_callback:
                 progress_callback(
                     "generating_config", 100,

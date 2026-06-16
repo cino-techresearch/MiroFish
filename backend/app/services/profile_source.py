@@ -8,8 +8,10 @@
 - FileProfileSource: 중립 JSON 주입(generator 미생성) — T-008에서 구현
 """
 
+import dataclasses
+import json
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from app.services.oasis_profile_generator import OasisAgentProfile, OasisProfileGenerator
 
@@ -57,3 +59,37 @@ class GeneratedProfileSource(ProfileSource):
             realtime_output_path=self.realtime_output_path,
             output_platform=self.output_platform,
         )
+
+
+class FileProfileSource(ProfileSource):
+    """중립 JSON 프로필을 OasisAgentProfile[] 로 로드하는 주입 소스 (FR-002, FR-011).
+
+    OasisProfileGenerator 를 생성하지 않으므로 LLM_API_KEY 가 없어도 동작한다.
+    중립 JSON 은 OasisAgentProfile 의 필드 이름을 그대로 사용하며, 알 수 없는 키는 무시한다.
+    """
+
+    _FIELD_NAMES = {f.name for f in dataclasses.fields(OasisAgentProfile)}
+
+    def __init__(
+        self,
+        profiles_path: Optional[str] = None,
+        profiles: Optional[List[Dict[str, Any]]] = None,
+    ):
+        if (profiles_path is None) == (profiles is None):
+            raise ValueError("profiles_path 또는 profiles 중 정확히 하나를 제공하세요")
+        self.profiles_path = profiles_path
+        self._raw = profiles
+
+    def _read_raw(self) -> List[Dict[str, Any]]:
+        if self._raw is not None:
+            return self._raw
+        with open(self.profiles_path, encoding="utf-8") as f:
+            return json.load(f)
+
+    def load_profiles(self) -> List[OasisAgentProfile]:
+        raw = self._read_raw()
+        result: List[OasisAgentProfile] = []
+        for item in raw:
+            known = {k: v for k, v in item.items() if k in self._FIELD_NAMES}
+            result.append(OasisAgentProfile(**known))
+        return result

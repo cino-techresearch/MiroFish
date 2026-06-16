@@ -55,7 +55,7 @@ dev = [
 packages = ["app"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "scripts"]
 pythonpath = ["."]
 addopts = "-ra"
 

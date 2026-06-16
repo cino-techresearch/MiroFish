@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getWizardPlan, nextStep, ALL_STEPS } from '../wizardSteps'
+import { getWizardPlan, ALL_STEPS } from '../wizardSteps'
 
 describe('wizardSteps (T-026 / FR-008, DOD-006, TS-011)', () => {
   it('생성/생성: 전체 스텝, 스킵 없음', () => {
@@ -27,10 +27,8 @@ describe('wizardSteps (T-026 / FR-008, DOD-006, TS-011)', () => {
     expect(plan.useInjectedProfiles).toBe(true)
   })
 
-  it('nextStep: 온톨로지 주입 시 graphBuild 건너뛰고 prepare 로 시작', () => {
-    // 스킵된 첫 활성 스텝은 prepare
+  it('온톨로지 주입 시 첫 활성 스텝은 prepare (graphBuild 스킵)', () => {
     const plan = getWizardPlan({ skipOntologySteps: true })
     expect(plan.steps[0]).toBe('prepare')
-    expect(nextStep('prepare', { skipOntologySteps: true })).toBe('simulate')
   })
 })

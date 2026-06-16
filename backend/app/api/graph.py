@@ -100,6 +100,13 @@ def reset_project(project_id: str):
             "error": t('api.projectNotFound', id=project_id)
         }), 404
 
+    # FR-010: 주입 project 는 ontology/text 가 없어 reset 대상이 아니다 — 거부(graph_id 보존)
+    if getattr(project, "source_type", "generated") == "injected":
+        return jsonify({
+            "success": False,
+            "error": t('api.injectedProjectNotResettable')
+        }), 400
+
     # 重置到本体已生成状态
     if project.ontology:
         project.status = ProjectStatus.ONTOLOGY_GENERATED
@@ -283,18 +290,7 @@ def build_graph():
     """
     try:
         logger.info("=== 开始构建图谱 ===")
-        
-        # 检查配置
-        errors = []
-        if not Config.ZEP_API_KEY:
-            errors.append(t('api.zepApiKeyMissing'))
-        if errors:
-            logger.error(f"配置错误: {errors}")
-            return jsonify({
-                "success": False,
-                "error": t('api.configError', details="; ".join(errors))
-            }), 500
-        
+
         # 解析请求
         data = request.get_json() or {}
         project_id = data.get('project_id')
@@ -314,9 +310,28 @@ def build_graph():
                 "error": t('api.projectNotFound', id=project_id)
             }), 404
 
+        # FR-010: 주입 project 는 외부 graph_id 재사용 — 빌드/재빌드 대상이 아니다. 거부(graph_id 보존)
+        # ZEP 설정 체크보다 먼저 평가해, ZEP 미설정 환경에서도 주입 project 를 명확히 거부한다.
+        if getattr(project, "source_type", "generated") == "injected":
+            return jsonify({
+                "success": False,
+                "error": t('api.injectedProjectNotBuildable')
+            }), 400
+
+        # 检查配置 (생성 project 의 그래프 빌드에만 필요)
+        errors = []
+        if not Config.ZEP_API_KEY:
+            errors.append(t('api.zepApiKeyMissing'))
+        if errors:
+            logger.error(f"配置错误: {errors}")
+            return jsonify({
+                "success": False,
+                "error": t('api.configError', details="; ".join(errors))
+            }), 500
+
         # 检查项目状态
         force = data.get('force', False)  # 强制重新构建
-        
+
         if project.status == ProjectStatus.CREATED:
             return jsonify({
                 "success": False,

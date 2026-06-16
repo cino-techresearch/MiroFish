@@ -34,8 +34,17 @@ class _NoGenerate:
 class _FakeParams:
     generation_reasoning = "fake"
 
+    def __init__(self, n=3):
+        # 주입 정합성 검증(FR-012)과 일치하도록 agent_configs/initial_posts 제공
+        self.agent_configs = [{"agent_id": i} for i in range(n)]
+
+        class _EC:
+            pass
+        self.event_config = _EC()
+        self.event_config.initial_posts = []
+
     def to_json(self):
-        return json.dumps({"agent_configs": []})
+        return json.dumps({"agent_configs": [a["agent_id"] for a in self.agent_configs]})
 
 
 class _FakeConfigGen:

@@ -9,6 +9,14 @@ export const createSimulation = (data) => {
 }
 
 /**
+ * 중립 JSON 프로필 주입 (페르소나 레이어, FR-004/FR-008)
+ * @param {Object} data - { simulation_id, profiles }
+ */
+export const uploadProfiles = (data) => {
+  return service.post('/api/simulation/profiles/upload', data)
+}
+
+/**
  * 准备模拟环境（异步任务）
  * @param {Object} data - { simulation_id, entity_types?, use_llm_for_profiles?, parallel_profile_count?, force_regenerate? }
  */

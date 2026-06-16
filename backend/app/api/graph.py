@@ -11,6 +11,7 @@ from flask import request, jsonify
 from . import graph_bp
 from ..config import Config
 from ..services.ontology_generator import OntologyGenerator
+from ..services.ontology_source import LLMOntologySource, ZepGraphOntologySource
 from ..services.graph_builder import GraphBuilderService
 from ..services.text_processor import TextProcessor
 from ..utils.file_parser import FileParser
@@ -220,14 +221,13 @@ def generate_ontology():
         ProjectManager.save_extracted_text(project.project_id, all_text)
         logger.info(f"文本提取完成，共 {len(all_text)} 字符")
         
-        # 生成本体
+        # 生成本体 (OntologySource 추상 사용 — FR-001)
         logger.info("调用 LLM 生成本体定义...")
-        generator = OntologyGenerator()
-        ontology = generator.generate(
+        ontology = LLMOntologySource(
             document_texts=document_texts,
             simulation_requirement=simulation_requirement,
-            additional_context=additional_context if additional_context else None
-        )
+            additional_context=additional_context if additional_context else None,
+        ).load()
         
         # 保存本体到项目
         entity_count = len(ontology.get("entity_types", []))
@@ -669,6 +669,12 @@ def inject_graph():
         project.simulation_requirement = simulation_requirement
         project.source_type = "injected"
         project.ontology_source = "zep_graph"
+        # FR-001: 재사용 graph 에서 온톨로지(entity_types)를 파생해 project.ontology 채움.
+        # ZEP 미가용 환경에서는 best-effort 로 생략(주입 자체는 성공).
+        try:
+            project.ontology = ZepGraphOntologySource(graph_id).load()
+        except Exception as oe:
+            logger.warning(f"주입 graph 온톨로지 파생 생략(ZEP 미가용 등): {oe}")
         if extracted_text:
             ProjectManager.save_extracted_text(project.project_id, extracted_text)
         ProjectManager.save_project(project)

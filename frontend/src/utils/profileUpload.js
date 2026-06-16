@@ -6,19 +6,24 @@
  * @param {File} file
  * @returns {Promise<Array>}
  */
-export function readProfilesFromFile(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      try {
-        resolve(JSON.parse(reader.result))
-      } catch (e) {
-        reject(new Error('프로필 파일이 유효한 JSON 이 아닙니다: ' + e.message))
-      }
-    }
-    reader.onerror = () => reject(reader.error || new Error('파일 읽기 실패'))
-    reader.readAsText(file)
-  })
+export async function readProfilesFromFile(file) {
+  // Blob.text() 은 promise 기반이라 await 체인이 정상 전파된다(FileReader 매크로태스크 회피).
+  let text
+  if (typeof file.text === 'function') {
+    text = await file.text()
+  } else {
+    text = await new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result)
+      reader.onerror = () => reject(reader.error || new Error('파일 읽기 실패'))
+      reader.readAsText(file)
+    })
+  }
+  try {
+    return JSON.parse(text)
+  } catch (e) {
+    throw new Error('프로필 파일이 유효한 JSON 이 아닙니다: ' + e.message)
+  }
 }
 
 /**

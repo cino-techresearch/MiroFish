@@ -87,6 +87,7 @@ import Step2EnvSetup from '../components/Step2EnvSetup.vue'
 import { generateOntology, getProject, buildGraph, getTaskStatus, getGraphData, injectGraph } from '../api/graph'
 import { getPendingUpload, clearPendingUpload } from '../store/pendingUpload'
 import { resolveOntologyAction, startInjection } from '../utils/projectStart'
+import { getWizardPlan } from '../utils/wizardSteps'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
 
 const route = useRoute()
@@ -223,8 +224,10 @@ const handleNewProject = async () => {
         const pj = await getProject(resp.project_id)
         projectData.value = pj.success ? pj.data : { project_id: resp.project_id, graph_id: resp.graph_id, status: 'graph_completed' }
         router.replace({ name: 'Process', params: { projectId: resp.project_id } })
-        currentPhase.value = 2
-        currentStep.value = 1  // Step1(시뮬레이션 생성)로 진입(그래프 빌드 스킵)
+        // FR-008: getWizardPlan 으로 스킵 스텝을 계산 — graphBuild 스킵 시 빌드 완료 단계로 진입
+        const plan = getWizardPlan(injectionConfig.value)
+        currentPhase.value = plan.skippedSteps.includes('graphBuild') ? 2 : 1
+        currentStep.value = 1  // 첫 활성 스텝(시뮬레이션 생성)
         ontologyProgress.value = null
         addLog(`Graph injected. project ${resp.project_id} ready for simulation.`)
         await refreshGraph()

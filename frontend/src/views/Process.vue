@@ -16,6 +16,9 @@
       </div>
     </nav>
 
+    <!-- 레이어 주입 패널 (FR-008): 업로드 단계에서 기존 그래프/프로필 주입 선택 -->
+    <InjectionPanel v-if="currentPhase < 1" @change="onInjectionChange" />
+
     <!-- 主内容区 -->
     <div class="main-content">
       <!-- 左侧: 实时图谱展示 -->
@@ -416,6 +419,8 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { generateOntology, getProject, buildGraph, getTaskStatus, getGraphData } from '../api/graph'
 import { getPendingUpload, clearPendingUpload } from '../store/pendingUpload'
+import InjectionPanel from '../components/InjectionPanel.vue'
+import { getWizardPlan } from '../utils/wizardSteps'
 import * as d3 from 'd3'
 
 const route = useRoute()
@@ -435,6 +440,12 @@ const ontologyProgress = ref(null) // 本体生成进度
 const currentPhase = ref(-1) // -1: 上传中, 0: 本体生成中, 1: 图谱构建, 2: 完成
 const selectedItem = ref(null) // 选中的节点或边
 const isFullScreen = ref(false)
+
+// 레이어 주입 설정 (FR-008) — InjectionPanel 의 change 이벤트로 갱신
+const injectionConfig = ref({ ontologyMode: 'generate', profileMode: 'generate' })
+// 주입 설정에 따른 마법사 계획(스킵 스텝 포함)
+const wizardPlan = computed(() => getWizardPlan(injectionConfig.value))
+const onInjectionChange = (cfg) => { injectionConfig.value = cfg }
 
 // DOM引用
 const graphContainer = ref(null)

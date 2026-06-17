@@ -44,7 +44,7 @@ SOURCE_PATH = os.path.abspath(
 
 def test_no_cjk_in_source():
     """Source file must contain zero CJK characters after T-003 translation."""
-    cjk_re = re.compile(r'[一-鿿]')
+    cjk_re = re.compile('[\\u4e00-\\u9fff]')
     with open(SOURCE_PATH, encoding="utf-8") as fh:
         source = fh.read()
     matches = cjk_re.findall(source)
@@ -129,13 +129,13 @@ def test_rule_based_student_country_from_list():
     )
     # Should be one of the English country names in COUNTRIES list
     assert isinstance(profile["country"], str)
-    assert not re.search(r'[一-鿿]', profile["country"]), (
+    assert not re.search('[\\u4e00-\\u9fff]', profile["country"]), (
         f"country contains CJK: {profile['country']!r}"
     )
 
 
 # ---------------------------------------------------------------------------
-# 4. _save_reddit_json: fallback country is "China" not "中国"
+# 4. _save_reddit_json: fallback country is the English "China"
 # ---------------------------------------------------------------------------
 
 def test_save_reddit_json_fallback_country():

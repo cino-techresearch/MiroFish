@@ -1,6 +1,7 @@
 /**
- * 临时存储待上传的文件和需求 + 레이어 주입 설정(FR-008)
- * 用于首页点击启动引擎后立即跳转，在Process页面再进行API调用
+ * Temporarily stores files and requirements pending upload + layer injection settings (FR-008)
+ * Used to navigate immediately after clicking "Start Engine" on the home page,
+ * then perform the API call on the Process page
  */
 import { reactive } from 'vue'
 

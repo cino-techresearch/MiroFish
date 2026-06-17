@@ -320,7 +320,7 @@ class AgentInterview:
                 # Filter junk content containing question numbers (Question 1-9)
                 skip = False
                 for d in '123456789':
-                    if f'\u95ee\u9898{d}' in clean_quote:
+                    if f'\u95ee\u9898{d}' in clean_quote or f'Question{d}' in clean_quote.replace(' ', ''):
                         skip = True
                         break
                 if skip:
@@ -1430,8 +1430,9 @@ Return the sub-question list in JSON format."""
                 clean_text = re.sub(r'Question\s*\d+[：:]\s*', '', clean_text)
                 clean_text = re.sub(r'【[^】]+】', '', clean_text)
 
-                # Strategy 1 (primary): Extract complete substantive sentences
-                sentences = re.split(r'[。！？]', clean_text)
+                # Strategy 1 (primary): Extract complete substantive sentences.
+                # Split on both English (.!?) and CJK (。！？) sentence terminators.
+                sentences = re.split(r'[。！？.!?]', clean_text)
                 meaningful = [
                     s.strip() for s in sentences
                     if 20 <= len(s.strip()) <= 150
@@ -1443,7 +1444,8 @@ Return the sub-question list in JSON format."""
 
                 # Strategy 2 (supplementary): Properly paired Chinese quotes 「」 with long text
                 if not key_quotes:
-                    paired = re.findall(r'\u201c([^\u201c\u201d]{15,100})\u201d', clean_text)
+                    paired = re.findall(r'"([^"]{15,100})"', clean_text)
+                    paired += re.findall(r'\u201c([^\u201c\u201d]{15,100})\u201d', clean_text)
                     paired += re.findall(r'\u300c([^\u300c\u300d]{15,100})\u300d', clean_text)
                     key_quotes = [q for q in paired if not re.match(r'^[，,；;：:、]', q)][:3]
                 

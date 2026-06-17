@@ -677,16 +677,16 @@ const customMaxRounds = ref(40)   // default recommended 40 rounds
 
 // Watch stage to update phase
 watch(currentStage, (newStage) => {
-  if (newStage === 'generating_agent_personas' || newStage === 'generating_profiles') {
+  if (newStage === 'generating_profiles') {
     phase.value = 1
-  } else if (newStage === 'generating_simulation_config' || newStage === 'generating_config') {
+  } else if (newStage === 'generating_config') {
     phase.value = 2
     // entering config generation phase, start polling for config
     if (!configTimer) {
       addLog(t('log.startGeneratingConfig'))
       startConfigPolling()
     }
-  } else if (newStage === 'preparing_simulation_scripts' || newStage === 'copying_scripts') {
+  } else if (newStage === 'copying_scripts') {
     phase.value = 2 // still part of the config phase
   }
 })
@@ -864,7 +864,7 @@ const pollPrepareStatus = async () => {
       
       // Parse stage info and emit detailed logs
       if (data.progress_detail) {
-        currentStage.value = data.progress_detail.current_stage_name || ''
+        currentStage.value = data.progress_detail.current_stage || ''
         
         // Emit detailed progress log (avoid duplicates)
         const detail = data.progress_detail

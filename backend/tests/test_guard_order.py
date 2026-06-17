@@ -82,4 +82,4 @@ def test_generation_path_zero_entities_still_generic_fail(tmp_path, monkeypatch)
     # injected_profiles.json 없음 → 생성 경로 → 기존 generic 가드
     result = mgr.prepare_simulation(simulation_id=state.simulation_id, simulation_requirement="r", document_text="d")
     assert result.status == SimulationStatus.FAILED
-    assert "实体" in result.error or "엔티티" in result.error
+    assert "엔티티" in result.error

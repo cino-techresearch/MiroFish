@@ -9,8 +9,11 @@ Final Acceptance 의 라이브 smoke(FA-005: 실서버로 chat_json 1회 호출)
 import pytest
 
 
-def _make_client(monkeypatch, content):
-    """canned content 를 반환하는 OpenAI 더블로 LLMClient 를 만든다."""
+def _make_client(monkeypatch, content, captured=None):
+    """canned content 를 반환하는 OpenAI 더블로 LLMClient 를 만든다.
+
+    captured 가 주어지면 create() 가 받은 kwargs 를 그 dict 에 기록한다(전송 인자 검증용).
+    """
     import app.utils.llm_client as mod
 
     class _Msg:
@@ -23,6 +26,8 @@ def _make_client(monkeypatch, content):
 
     class _Completions:
         def create(self, **kwargs):
+            if captured is not None:
+                captured.update(kwargs)
             return _Resp(content)
 
     class _Chat:
@@ -34,6 +39,18 @@ def _make_client(monkeypatch, content):
 
     monkeypatch.setattr(mod, "OpenAI", _FakeOpenAI)
     return mod.LLMClient(api_key="k", base_url="http://x/v1", model="m")
+
+
+def test_chat_json_sends_json_object_response_format(monkeypatch):
+    """chat_json 이 response_format={'type':'json_object'} 를 실제로 전송한다 (회귀 가드).
+
+    이 인자를 삭제하면 본 테스트가 RED — json_object 전송 회귀를 required 단위 스위트에서 고정한다.
+    (서버의 실제 json_object 지원 여부는 FA-005 라이브 smoke 가 별도로 실증.)
+    """
+    captured = {}
+    client = _make_client(monkeypatch, '{"status": "ok"}', captured=captured)
+    client.chat_json([{"role": "user", "content": "x"}])
+    assert captured.get("response_format") == {"type": "json_object"}
 
 
 def test_chat_json_plain(monkeypatch):

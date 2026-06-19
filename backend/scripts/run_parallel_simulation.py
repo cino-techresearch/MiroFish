@@ -1006,7 +1006,9 @@ def create_model(config: Dict[str, Any], use_boost: bool = False):
     boost_api_key = os.environ.get("LLM_BOOST_API_KEY", "")
     boost_base_url = os.environ.get("LLM_BOOST_BASE_URL", "")
     boost_model = os.environ.get("LLM_BOOST_MODEL_NAME", "")
-    has_boost_config = bool(boost_api_key)
+    # Require both api_key and base_url so a partial boost config (key set, base_url empty)
+    # falls back to the general LLM config instead of leaking a stale OPENAI_API_BASE_URL.
+    has_boost_config = bool(boost_api_key and boost_base_url)
 
     # Select which LLM to use based on the parameter and available configuration
     if use_boost and has_boost_config:

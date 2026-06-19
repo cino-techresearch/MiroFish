@@ -1,8 +1,9 @@
 """chat_json 응답 파싱 검증 (FR-005 / TS-005).
 
-내부 서버는 response_format=json_object 를 지원함이 확인됐으므로(OQ-3 해소)
-llm_client 코드 변경 없이, 다양한 응답 래핑(markdown fence / <think> 블록)에서도
-chat_json 이 dict 로 정확히 파싱하는지 검증한다.
+이 파일은 응답 래핑(markdown fence / <think> 블록) 파싱만 mock 으로 검증한다.
+내부 서버의 response_format=json_object 지원 여부(OQ-3)는 여기서 단정하지 않고,
+Final Acceptance 의 라이브 smoke(FA-005: 실서버로 chat_json 1회 호출)가 실증한다.
+즉 파싱 계약은 본 단위 테스트, json_object 지원은 FA-005 라이브 증거로 분리한다.
 """
 
 import pytest

@@ -112,12 +112,19 @@ cp .env.example .env
 **Required Environment Variables:**
 
 ```env
-# LLM API Configuration (supports any LLM API with OpenAI SDK format)
-# Recommended: Alibaba Qwen-plus model via Bailian Platform: https://bailian.console.aliyun.com/
+# LLM API Configuration (any OpenAI SDK-compatible endpoint)
+# Point this at your internal OpenAI-compatible server (include the /v1 suffix).
 # High consumption, try simulations with fewer than 40 rounds first
 LLM_API_KEY=your_api_key
-LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-LLM_MODEL_NAME=qwen-plus
+LLM_BASE_URL=http://127.0.0.1:39281/v1
+LLM_MODEL_NAME=gpt-5.5
+
+# Boosted LLM Configuration (OPTIONAL — only for OASIS parallel-simulation boost)
+# Leave unset to fall back to the main LLM_* config above. If set, both API key
+# and base URL must be provided together.
+LLM_BOOST_API_KEY=your_api_key
+LLM_BOOST_BASE_URL=http://127.0.0.1:39281/v1
+LLM_BOOST_MODEL_NAME=gpt-5.5
 
 # Zep Cloud Configuration
 # Free monthly quota is sufficient for simple usage: https://app.getzep.com/

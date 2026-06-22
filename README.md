@@ -119,7 +119,9 @@ LLM_API_KEY=your_api_key
 LLM_BASE_URL=http://127.0.0.1:39281/v1
 LLM_MODEL_NAME=gpt-5.5
 
-# Boosted LLM Configuration (OASIS simulation; simulation scripts read these directly)
+# Boosted LLM Configuration (OPTIONAL — only for OASIS parallel-simulation boost)
+# Leave unset to fall back to the main LLM_* config above. If set, both API key
+# and base URL must be provided together.
 LLM_BOOST_API_KEY=your_api_key
 LLM_BOOST_BASE_URL=http://127.0.0.1:39281/v1
 LLM_BOOST_MODEL_NAME=gpt-5.5

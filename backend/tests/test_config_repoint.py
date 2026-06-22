@@ -16,6 +16,33 @@ _ENV_PATH = os.path.join(_PROJECT_ROOT, ".env")
 _ENV_EXAMPLE = os.path.join(_PROJECT_ROOT, ".env.example")
 
 
+def test_config_reads_env_without_dotenv_file():
+    """TS-001(CI-runnable): .env 파일 없이도 Config 가 env 의 base_url/model 을 읽는다.
+
+    config.py 가 모듈 로드 시 호출하는 dotenv.load_dotenv 를 no-op 으로 패치한 별도 프로세스에서
+    env 만 주입해 검증한다(.env 존재/부재와 무관 — CI 에서도 실행됨). 핵심 repoint 계약(env→Config)이
+    skipif 로 CI 에서 빠지지 않도록 보장한다.
+    """
+    code = (
+        "import dotenv; dotenv.load_dotenv = lambda *a, **k: None;"
+        "from app.config import Config;"
+        "print(Config.LLM_BASE_URL); print(Config.LLM_MODEL_NAME)"
+    )
+    env = dict(os.environ)
+    env["LLM_BASE_URL"] = "http://internal.test:39281/v1"
+    env["LLM_MODEL_NAME"] = "gpt-5.5"
+    env["LLM_API_KEY"] = "test-key"
+    r = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=_BACKEND_DIR, env=env, capture_output=True, text=True,
+    )
+    assert r.returncode == 0, r.stderr
+    base, model = r.stdout.strip().splitlines()[-2:]
+    assert base == "http://internal.test:39281/v1", f"Config가 env base_url 미반영: {base}"
+    assert model == "gpt-5.5"
+    assert "openrouter" not in base.lower()
+
+
 @pytest.mark.skipif(not os.path.exists(_ENV_PATH), reason="로컬 .env 없음 (CI)")
 def test_config_loads_internal_server_from_env():
     """TS-001: Config 가 실제 .env 의 내부 서버 base_url(/v1)/model(gpt-5.5)을 로딩한다.
